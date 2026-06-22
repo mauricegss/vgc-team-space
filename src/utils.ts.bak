@@ -1,0 +1,165 @@
+import type { Pokemon, TeamData, CoreGroup } from './types';
+
+// Check if two pokemon builds conflict (Strict check for Combinations)
+export const doPokemonConflict = (p1: Pokemon, p2: Pokemon): boolean => {
+    if (p1.name !== p2.name) return false;
+    if (p1.item !== p2.item) return true;
+    if (p1.ability !== p2.ability) return true;
+
+    const moves1 = [...p1.moves].sort();
+    const moves2 = [...p2.moves].sort();
+    if (JSON.stringify(moves1) !== JSON.stringify(moves2)) return true;
+
+    const stats: (keyof Pokemon['evs'])[] = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+    for (const stat of stats) {
+        if (Math.abs(p1.evs[stat] - p2.evs[stat]) > 5) return true;
+    }
+    return false;
+};
+
+// VP Cost Calculator for transitioning from Source to Target
+export const calculatePokemonTransitionCost = (source: Pokemon, target: Pokemon): number => {
+    let cost = 0;
+    
+    if (source.ability !== target.ability) cost += 500; // Trocar Habilidade
+    
+    // Normalize nature strings to prevent order mismatches (e.g. "+spa -atk" vs "-atk +spa")
+    const normalizeNature = (n?: string): string => {
+        if (!n) return '';
+        return n.toLowerCase().trim().split(/\s+/).sort().join(' ');
+    };
+    
+    if (normalizeNature(source.nature) !== normalizeNature(target.nature)) cost += 500; // Trocar Nature
+    
+    const sourceMoves = source.moves.filter(Boolean);
+    const targetMoves = target.moves.filter(Boolean);
+    const movesToLearn = targetMoves.filter(m => !sourceMoves.includes(m));
+    cost += movesToLearn.length * 250; // Aprender novos golpes
+
+    const stats: (keyof Pokemon['evs'])[] = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+    for (const stat of stats) {
+        if (target.evs[stat] > source.evs[stat]) {
+            cost += (target.evs[stat] - source.evs[stat]) * 5; // Adicionar EVs
+        }
+    }
+    return cost;
+};
+
+export const calculateTeamTransitionCost = (source: TeamData, target: TeamData, ignoredPokemons: string[] = []) => {
+    let vpCost = 0;
+    let newPokemonCount = 0;
+    let sharedPokemonCount = 0;
+
+    target.team.forEach(targetPoke => {
+        if (!targetPoke.name || ignoredPokemons.includes(targetPoke.name)) {
+            newPokemonCount += 1;
+            return;
+        }
+        const sourcePoke = source.team.find(p => p.name === targetPoke.name);
+        if (sourcePoke) {
+            sharedPokemonCount += 1;
+            vpCost += calculatePokemonTransitionCost(sourcePoke, targetPoke);
+        } else {
+            newPokemonCount += 1;
+        }
+    });
+
+    return { vpCost, newPokemonCount, sharedPokemonCount };
+};
+
+
+// Check if two teams are compatible (Cost up to 30 VP is allowed)
+export const areTeamsCompatible = (t1: TeamData, t2: TeamData, ignoredPokemons: string[] = []): boolean => {
+    const cost = calculateTeamTransitionCost(t1, t2, ignoredPokemons);
+    return cost.vpCost <= 30;
+};
+
+// Find pairs/trios of pokemon that appear together frequently (Cores)
+export const findCores = (teams: TeamData[]): CoreGroup[] => {
+    if (!Array.isArray(teams)) return [];
+    const pairCounts: Record<string, TeamData[]> = {};
+
+    teams.forEach(team => {
+        if (!team.team) return;
+        const names = team.team.map(p => p.name).filter(Boolean).sort();
+        // Just look at pairs for simplicity of "cores"
+        for (let i = 0; i < names.length; i++) {
+            for (let j = i + 1; j < names.length; j++) {
+                const pairKey = `${names[i]} + ${names[j]}`;
+                if (!pairCounts[pairKey]) pairCounts[pairKey] = [];
+                pairCounts[pairKey].push(team);
+            }
+        }
+    });
+
+    const cores: CoreGroup[] = [];
+    Object.entries(pairCounts).forEach(([key, teamList]) => {
+        // A core is valid if it appears in at least 2 different teams
+        if (teamList.length >= 2) {
+            cores.push({
+                id: key,
+                corePokemonNames: key.split(' + '),
+                teams: Array.from(new Set(teamList)) // unique teams
+            });
+        }
+    });
+
+    // Sort cores by popularity
+    return cores.sort((a, b) => b.teams.length - a.teams.length);
+};
+
+// Find isolated teams (teams that share ZERO pokemon with any other team)
+export const findIsolatedTeams = (teams: TeamData[], ignoredPokemons: string[] = []): TeamData[] => {
+    if (!Array.isArray(teams)) return [];
+    return teams.filter(t1 => {
+        if (!t1.team) return false;
+        return !teams.some(t2 => {
+            if (!t2.team) return false;
+            if (t1.player_name === t2.player_name) return false;
+            // Does t1 share ANY non-ignored pokemon name with t2?
+            return t1.team.some(p1 => {
+                if (!p1.name || ignoredPokemons.includes(p1.name)) return false;
+                return t2.team.some(p2 => p1.name === p2.name);
+            });
+        });
+    });
+};
+
+// Simple recursive function to find combinations of compatible teams
+export const findCombinations = (teams: TeamData[], targetSize: number = 3, maxLimit: number = 50, ignoredPokemons: string[] = []): TeamData[][] => {
+    if (!Array.isArray(teams)) return [];
+    const validCombos: TeamData[][] = [];
+
+    const search = (currentCombo: TeamData[], startIndex: number) => {
+        if (validCombos.length >= maxLimit) return; // Stop if we found enough
+        
+        if (currentCombo.length === targetSize) {
+            validCombos.push([...currentCombo]);
+            return;
+        }
+
+        for (let i = startIndex; i < teams.length; i++) {
+            if (validCombos.length >= maxLimit) return;
+            const candidate = teams[i];
+            if (!candidate.team) continue;
+            
+            // Check if candidate is compatible with all teams currently in combo
+            const isCompatibleWithAll = currentCombo.every(t => areTeamsCompatible(t, candidate, ignoredPokemons));
+            
+            if (isCompatibleWithAll) {
+                currentCombo.push(candidate);
+                search(currentCombo, i + 1);
+                currentCombo.pop();
+            }
+        }
+    };
+
+    search([], 0);
+    return validCombos;
+};
+
+export const getPokeIcon = (name: string) => {
+    if (!name) return 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png';
+    const sanitized = name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    return `https://r2.limitlesstcg.net/pokemon/gen9/${sanitized}.png`;
+};

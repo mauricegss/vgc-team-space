@@ -1,0 +1,889 @@
+import { useState, useMemo, useEffect } from 'react';
+import rawData from '../dados-completos.json';
+import type { TeamData } from './types';
+import { findIsolatedTeams, findCombinations, getPokeIcon, calculateTeamTransitionCost } from './utils';
+
+interface PokemonComparisonRowProps {
+  name: string;
+  pokeA?: any;
+  pokeB?: any;
+}
+
+const PokemonComparisonRow = ({ name, pokeA, pokeB }: PokemonComparisonRowProps) => {
+  const normNature = (n?: string) => n ? n.toLowerCase().trim().split(/\s+/).sort().join(' ') : 'neutro';
+  const stats: ('hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe')[] = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+
+  if (pokeA && pokeB) {
+    const isItemDiff = pokeA.item !== pokeB.item;
+    const isAbilityDiff = pokeA.ability !== pokeB.ability;
+    const isNatureDiff = normNature(pokeA.nature) !== normNature(pokeB.nature);
+
+    const movesA = pokeA.moves.filter(Boolean);
+    const movesB = pokeB.moves.filter(Boolean);
+
+    return (
+      <div className="bg-slate-900/50 rounded-xl border border-slate-800/80 p-4 flex flex-col gap-3 hover:border-slate-700/60 transition-all">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+          <div className="flex items-center gap-2.5">
+            <img src={getPokeIcon(name)} alt={name} className="w-9 h-9 object-contain filter drop-shadow-md" onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
+            <span className="font-bold text-sm text-slate-100">{name}</span>
+          </div>
+          <span className="text-[10px] bg-slate-950 text-indigo-400 font-bold px-2 py-0.5 rounded border border-indigo-900/60">
+            Presente em ambos os times
+          </span>
+        </div>
+
+        {/* Content Comparison Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
+          {/* Team A Build */}
+          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800/50 flex flex-col gap-2.5">
+            <div className="flex justify-between items-center pb-1.5 border-b border-slate-800/30">
+              <span className="font-bold text-[9px] text-pink-400 uppercase tracking-wider">Build no Time A</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Item</span>
+                <span className={`font-mono text-slate-300 truncate block ${isItemDiff ? 'text-amber-400 font-semibold bg-amber-950/20 px-1 rounded border border-amber-900/20' : ''}`}>{pokeA.item || 'Nenhum'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Habilidade</span>
+                <span className={`text-slate-300 truncate block ${isAbilityDiff ? 'text-amber-400 font-semibold bg-amber-950/20 px-1 rounded border border-amber-900/20' : ''}`}>{pokeA.ability || 'Nenhuma'}</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase">Nature</span>
+              <span className={`text-slate-300 ${isNatureDiff ? 'text-amber-400 font-semibold bg-amber-950/20 px-1 rounded border border-amber-900/20' : ''}`}>{pokeA.nature || 'Neutro'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Golpes</span>
+              <div className="grid grid-cols-2 gap-1 bg-slate-900/20 p-1.5 rounded border border-slate-800/40">
+                {pokeA.moves.map((move: string, i: number) => {
+                  if (!move) return <span key={i} className="text-slate-700 italic">• Vazio</span>;
+                  const isDiff = !movesB.includes(move);
+                  return (
+                    <span key={i} className={`truncate font-medium ${isDiff ? 'text-red-400/80 line-through bg-red-950/10 px-1.5 py-0.5 rounded border border-red-900/10' : 'text-slate-300 px-1.5 py-0.5'}`}>
+                      {move}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Distribuição de EVs</span>
+              <div className="grid grid-cols-6 gap-1">
+                {stats.map(s => {
+                  const isDiff = pokeA.evs[s] !== pokeB.evs[s];
+                  return (
+                    <div key={s} className={`flex flex-col items-center p-1 rounded transition-all ${isDiff ? 'bg-amber-950/25 border border-amber-900/40' : 'bg-slate-900/30'}`}>
+                      <span className="text-slate-500 uppercase text-[7px] font-bold">{s}</span>
+                      <span className={`font-mono text-[9px] font-bold ${isDiff ? 'text-amber-400' : 'text-slate-400'}`}>{pokeA.evs[s]}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Team B Build */}
+          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800/50 flex flex-col gap-2.5">
+            <div className="flex justify-between items-center pb-1.5 border-b border-slate-800/30">
+              <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wider">Build no Time B</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Item</span>
+                <span className={`font-mono text-slate-300 truncate block ${isItemDiff ? 'text-emerald-400 font-semibold bg-emerald-950/25 px-1 rounded border border-emerald-900/30' : ''}`}>{pokeB.item || 'Nenhum'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Habilidade</span>
+                <span className={`text-slate-300 truncate block ${isAbilityDiff ? 'text-emerald-400 font-semibold bg-emerald-950/25 px-1 rounded border border-emerald-900/30' : ''}`}>{pokeB.ability || 'Nenhuma'}</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase">Nature</span>
+              <span className={`text-slate-300 ${isNatureDiff ? 'text-emerald-400 font-semibold bg-emerald-950/25 px-1 rounded border border-emerald-900/30' : ''}`}>{pokeB.nature || 'Neutro'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Golpes</span>
+              <div className="grid grid-cols-2 gap-1 bg-slate-900/20 p-1.5 rounded border border-slate-800/40">
+                {pokeB.moves.map((move: string, i: number) => {
+                  if (!move) return <span key={i} className="text-slate-700 italic">• Vazio</span>;
+                  const isDiff = !movesA.includes(move);
+                  return (
+                    <span key={i} className={`truncate font-medium ${isDiff ? 'text-emerald-400 font-semibold bg-emerald-950/20 px-1.5 py-0.5 rounded border border-emerald-900/20' : 'text-slate-300 px-1.5 py-0.5'}`}>
+                      {move} {isDiff && <span className="text-[7px] text-emerald-400 font-bold bg-emerald-950/45 px-1 rounded ml-0.5">Novo!</span>}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Distribuição de EVs</span>
+              <div className="grid grid-cols-6 gap-1">
+                {stats.map(s => {
+                  const isDiff = pokeA.evs[s] !== pokeB.evs[s];
+                  return (
+                    <div key={s} className={`flex flex-col items-center p-1 rounded transition-all ${isDiff ? 'bg-emerald-950/20 border border-emerald-900/30' : 'bg-slate-900/30'}`}>
+                      <span className="text-slate-500 uppercase text-[7px] font-bold">{s}</span>
+                      <span className={`font-mono text-[9px] font-bold ${isDiff ? 'text-emerald-400' : 'text-slate-400'}`}>{pokeB.evs[s]}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (pokeA) {
+    return (
+      <div className="bg-slate-900/50 rounded-xl border border-red-950/30 p-4 flex flex-col gap-3 hover:border-red-900/40 transition-all">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+          <div className="flex items-center gap-2.5">
+            <img src={getPokeIcon(name)} alt={name} className="w-9 h-9 object-contain filter drop-shadow-md" onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
+            <span className="font-bold text-sm text-slate-100">{name}</span>
+          </div>
+          <span className="text-[10px] bg-red-950/40 text-red-400 font-bold px-2 py-0.5 rounded border border-red-900/50">
+            Exclusivo do Time A
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
+          {/* Team A Build */}
+          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800/50 flex flex-col gap-2.5">
+            <div className="flex justify-between items-center pb-1.5 border-b border-slate-800/30">
+              <span className="font-bold text-[9px] text-pink-400 uppercase tracking-wider">Build no Time A</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Item</span>
+                <span className="font-mono text-slate-300 block truncate">{pokeA.item || 'Nenhum'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Habilidade</span>
+                <span className="text-slate-300 block truncate">{pokeA.ability || 'Nenhuma'}</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase">Nature</span>
+              <span className="text-slate-300">{pokeA.nature || 'Neutro'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Golpes</span>
+              <div className="grid grid-cols-2 gap-1 bg-slate-900/20 p-1.5 rounded border border-slate-800/40">
+                {pokeA.moves.map((move: string, i: number) => (
+                  <span key={i} className="text-slate-300 px-1.5 py-0.5 truncate">
+                    {move || <span className="text-slate-700 italic">Vazio</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Distribuição de EVs</span>
+              <div className="grid grid-cols-6 gap-1">
+                {stats.map(s => (
+                  <div key={s} className="flex flex-col items-center p-1 rounded bg-slate-900/30">
+                    <span className="text-slate-500 uppercase text-[7px] font-bold">{s}</span>
+                    <span className="font-mono text-[9px] text-slate-400 font-bold">{pokeA.evs[s]}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Team B Empty State */}
+          <div className="bg-slate-950/20 p-6 rounded-lg border border-dashed border-slate-800/80 flex flex-col items-center justify-center text-center">
+            <span className="text-2xl mb-2 filter drop-shadow-md">❌</span>
+            <h4 className="font-bold text-slate-400 text-xs">Ausente no Time B</h4>
+            <p className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-relaxed">Este Pokémon não faz parte da composição do Time B.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (pokeB) {
+    return (
+      <div className="bg-slate-900/50 rounded-xl border border-emerald-950/30 p-4 flex flex-col gap-3 hover:border-emerald-900/40 transition-all">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
+          <div className="flex items-center gap-2.5">
+            <img src={getPokeIcon(name)} alt={name} className="w-9 h-9 object-contain filter drop-shadow-md" onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
+            <span className="font-bold text-sm text-slate-100">{name}</span>
+          </div>
+          <span className="text-[10px] bg-emerald-950/40 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-900/50">
+            Exclusivo do Time B
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
+          {/* Team A Empty State */}
+          <div className="bg-slate-950/20 p-6 rounded-lg border border-dashed border-slate-800/80 flex flex-col items-center justify-center text-center">
+            <span className="text-2xl mb-2 filter drop-shadow-md">❌</span>
+            <h4 className="font-bold text-slate-400 text-xs">Ausente no Time A</h4>
+            <p className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-relaxed">Este Pokémon não faz parte da composição do Time A.</p>
+          </div>
+
+          {/* Team B Build */}
+          <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800/50 flex flex-col gap-2.5">
+            <div className="flex justify-between items-center pb-1.5 border-b border-slate-800/30">
+              <span className="font-bold text-[9px] text-emerald-400 uppercase tracking-wider">Build no Time B</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Item</span>
+                <span className="font-mono text-slate-300 block truncate">{pokeB.item || 'Nenhum'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 font-bold block text-[9px] uppercase">Habilidade</span>
+                <span className="text-slate-300 block truncate">{pokeB.ability || 'Nenhuma'}</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase">Nature</span>
+              <span className="text-slate-300">{pokeB.nature || 'Neutro'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Golpes</span>
+              <div className="grid grid-cols-2 gap-1 bg-slate-900/20 p-1.5 rounded border border-slate-800/40">
+                {pokeB.moves.map((move: string, i: number) => (
+                  <span key={i} className="text-slate-300 px-1.5 py-0.5 truncate">
+                    {move || <span className="text-slate-700 italic">Vazio</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Distribuição de EVs</span>
+              <div className="grid grid-cols-6 gap-1">
+                {stats.map(s => (
+                  <div key={s} className="flex flex-col items-center p-1 rounded bg-slate-900/30">
+                    <span className="text-slate-500 uppercase text-[7px] font-bold">{s}</span>
+                    <span className="font-mono text-[9px] text-slate-400 font-bold">{pokeB.evs[s]}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
+
+function App() {
+  const initialData = Array.isArray(rawData) ? rawData : (rawData as any).default || [];
+  const [teams, setTeams] = useState<TeamData[]>(initialData as TeamData[]);
+  const [comboSize, setComboSize] = useState<number>(3);
+
+  // Transition Calculator State
+  const [sourceTeamName, setSourceTeamName] = useState<string>('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const getInitialNewTeam = (): TeamData => ({
+    player_name: '',
+    isCustom: true,
+    team: Array(6).fill(null).map(() => ({
+      name: '', item: '', ability: '', moves: ['', '', '', ''],
+      evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+      nature: ''
+    }))
+  });
+  const [newTeam, setNewTeam] = useState<TeamData>(getInitialNewTeam());
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [ignoredPokemons, setIgnoredPokemons] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('vgc_ignored_pokemons') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [teamA, setTeamA] = useState<string>('');
+  const [teamB, setTeamB] = useState<string>('');
+  const [excludedTeamNames, setExcludedTeamNames] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('vgc_excluded_teams') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleExcludeTeam = (teamName: string) => {
+    setExcludedTeamNames(prev => {
+      const isExcluded = prev.includes(teamName);
+      if (isExcluded) {
+        return prev.filter(name => name !== teamName);
+      } else {
+        if (sourceTeamName === teamName) setSourceTeamName('');
+        if (teamA === teamName) setTeamA('');
+        if (teamB === teamName) setTeamB('');
+        return [...prev, teamName];
+      }
+    });
+  };
+
+  useEffect(() => {
+    const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
+    const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
+
+    let allTeams = [...initialData, ...custom];
+    if (deleted.length > 0) {
+      allTeams = allTeams.filter(t => !deleted.includes(t.player_name));
+    }
+    setTeams(allTeams);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('vgc_ignored_pokemons', JSON.stringify(ignoredPokemons));
+  }, [ignoredPokemons]);
+
+  useEffect(() => {
+    localStorage.setItem('vgc_excluded_teams', JSON.stringify(excludedTeamNames));
+  }, [excludedTeamNames]);
+
+  const saveNewTeam = () => {
+    if (!newTeam.player_name) return alert("Por favor, insira o nome do treinador.");
+    const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
+    custom.push(newTeam);
+    localStorage.setItem('vgc_custom_teams', JSON.stringify(custom));
+    setTeams([...teams, newTeam]);
+    setNewTeam(getInitialNewTeam());
+    setShowAddModal(false);
+  };
+
+  // Computed data
+  const activeTeams = useMemo(() => {
+    return teams.filter(t => !excludedTeamNames.includes(t.player_name));
+  }, [teams, excludedTeamNames]);
+
+  const isolatedTeams = useMemo(() => findIsolatedTeams(activeTeams, ignoredPokemons), [activeTeams, ignoredPokemons]);
+
+  const nonIsolatedTeams = useMemo(() => {
+    return activeTeams.filter(t => !isolatedTeams.some(iso => iso.player_name === t.player_name));
+  }, [activeTeams, isolatedTeams]);
+
+  const availableSizes = useMemo(() => {
+    return [2, 3].filter(size => findCombinations(nonIsolatedTeams, size, 1, ignoredPokemons).length > 0);
+  }, [nonIsolatedTeams, ignoredPokemons]);
+
+  const combinations = useMemo(() => {
+    const rawCombos = findCombinations(nonIsolatedTeams, comboSize, 100, ignoredPokemons);
+    const withCost = rawCombos.map(combo => {
+      let totalVp = 0;
+      for (let i = 0; i < combo.length; i++) {
+        for (let j = i + 1; j < combo.length; j++) {
+          totalVp += calculateTeamTransitionCost(combo[i], combo[j], ignoredPokemons).vpCost;
+        }
+      }
+      return { combo, totalVp };
+    });
+    return withCost.sort((a, b) => a.totalVp - b.totalVp).slice(0, 50);
+  }, [nonIsolatedTeams, comboSize, ignoredPokemons]);
+
+  const pokemonFrequencies = useMemo(() => {
+    const counts = new Map<string, number>();
+    activeTeams.forEach(t => {
+      t.team.forEach(p => {
+        if (p.name) counts.set(p.name, (counts.get(p.name) || 0) + 1);
+      });
+    });
+    return Array.from(counts.entries())
+      .filter(([_, count]) => count > 1)
+      .sort((a, b) => b[1] - a[1]);
+  }, [activeTeams]);
+
+  // Global Transitions (Top 50 Cheapest pairs)
+  const globalTransitions = useMemo(() => {
+    const allTransitions: { source: TeamData, target: TeamData, cost: ReturnType<typeof calculateTeamTransitionCost> }[] = [];
+    for (let i = 0; i < activeTeams.length; i++) {
+      for (let j = i + 1; j < activeTeams.length; j++) {
+        const source = activeTeams[i];
+        const target = activeTeams[j];
+
+        // Avalia as duas direções e pega a mais barata
+        const costAB = calculateTeamTransitionCost(source, target);
+        const costBA = calculateTeamTransitionCost(target, source);
+
+        const bestDirection = costAB.vpCost <= costBA.vpCost
+          ? { source, target, cost: costAB }
+          : { source: target, target: source, cost: costBA };
+
+        // Desconsidera times que compartilham apenas 1 ou nenhum Pokémon (não é uma transição real)
+        if (bestDirection.cost.sharedPokemonCount > 1) {
+          allTransitions.push(bestDirection);
+        }
+      }
+    }
+    return allTransitions.sort((a, b) => {
+      if (a.cost.vpCost !== b.cost.vpCost) return a.cost.vpCost - b.cost.vpCost;
+      return a.cost.newPokemonCount - b.cost.newPokemonCount; // Desempate: Menos Pokemons novos é melhor
+    }).slice(0, 50);
+  }, [activeTeams]);
+
+  // Transition Calculation
+  const transitionList = useMemo(() => {
+    if (!sourceTeamName) return [];
+    const sourceTeam = activeTeams.find(t => t.player_name === sourceTeamName);
+    if (!sourceTeam) return [];
+
+    return activeTeams
+      .filter(t => t.player_name !== sourceTeamName)
+      .map(targetTeam => {
+        const cost = calculateTeamTransitionCost(sourceTeam, targetTeam);
+        return { team: targetTeam, cost };
+      })
+      .filter(item => item.cost.sharedPokemonCount > 1) // Desconsidera transições que compartilham apenas 1 Pokémon
+      .sort((a, b) => {
+        if (a.cost.vpCost !== b.cost.vpCost) return a.cost.vpCost - b.cost.vpCost;
+        return a.cost.newPokemonCount - b.cost.newPokemonCount; // Desempate: Menos Pokemons diferentes é melhor
+      });
+  }, [activeTeams, sourceTeamName]);
+
+  const comparisonData = useMemo(() => {
+    if (!teamA || !teamB || !showCompareModal) return null;
+
+    const teamObjA = teams.find(t => t.player_name === teamA);
+    const teamObjB = teams.find(t => t.player_name === teamB);
+    if (!teamObjA || !teamObjB) return null;
+
+    const allPokeNames = Array.from(new Set([
+      ...teamObjA.team.map(p => p.name),
+      ...teamObjB.team.map(p => p.name)
+    ])).filter(Boolean);
+
+    const pokemonComparisons = allPokeNames.map(name => {
+      const pokeA = teamObjA.team.find(p => p.name === name);
+      const pokeB = teamObjB.team.find(p => p.name === name);
+      return { name, pokeA, pokeB };
+    });
+
+    return {
+      teamObjA,
+      teamObjB,
+      pokemonComparisons
+    };
+  }, [teamA, teamB, showCompareModal, teams]);
+
+  const PokemonIcon = ({ poke, isShared = false }: { poke: { name: string; nature?: string }, isShared?: boolean }) => (
+    <div className={`relative group/icon ${isShared ? 'ring-2 ring-emerald-400 bg-emerald-400/20 rounded-full' : ''}`} title={poke.nature ? `${poke.name} (${poke.nature})` : poke.name}>
+      <img src={getPokeIcon(poke.name)} alt={poke.name} className="w-6 h-6 object-contain filter drop-shadow-md"
+        onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/icon:block z-50 bg-slate-900 text-[9px] px-1.5 py-0.5 rounded shadow-xl whitespace-nowrap">
+        {poke.name || '???'} {poke.nature && <span className="text-blue-300">({poke.nature})</span>}
+        {isShared && <span className="ml-1 text-emerald-400 font-bold">(Idêntico)</span>}
+      </div>
+    </div>
+  );
+
+  const TeamCardRow = ({ team, isActive, onSelect }: { team: TeamData, isActive: boolean, onSelect: () => void }) => {
+    const isExcluded = excludedTeamNames.includes(team.player_name);
+    return (
+      <div className={`flex items-center justify-between p-1.5 rounded border transition-all ${isExcluded ? 'opacity-40 bg-slate-950/20 border-slate-900 shadow-none' : isActive ? 'bg-indigo-950/40 border-indigo-500/80 shadow-md shadow-indigo-500/10' : 'bg-slate-900/30 border-slate-800 hover:border-slate-600'}`}>
+        <div className="flex flex-col flex-1 min-w-0 pr-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="font-bold text-[11px] text-slate-200 truncate">{team.player_name}</span>
+          </div>
+          {team.rental_code && <span className="text-[9px] text-indigo-300 font-mono mt-0.5 bg-indigo-900/30 px-1 rounded select-all w-fit">{team.rental_code}</span>}
+        </div>
+        <div className="flex gap-0.5 shrink-0">
+          {team.team.map((p, i) => <PokemonIcon key={i} poke={p} />)}
+        </div>
+        <div className="flex items-center gap-1.5 ml-2">
+          <button 
+            disabled={isExcluded}
+            onClick={onSelect} 
+            className={`text-[9px] px-1.5 py-0.5 rounded font-bold transition-all ${isExcluded ? 'bg-slate-900/40 text-slate-600 cursor-not-allowed border border-slate-900' : isActive ? 'bg-indigo-600 text-white shadow shadow-indigo-500/30' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+          >
+            {isActive ? 'Base' : 'Focar'}
+          </button>
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleExcludeTeam(team.player_name);
+            }} 
+            className={`text-[10px] p-1 rounded hover:bg-slate-800/80 transition-colors ${isExcluded ? 'text-red-400 hover:text-red-300' : 'text-slate-500 hover:text-slate-300'}`}
+            title={isExcluded ? "Incluir time nos cálculos" : "Omitir time dos cálculos"}
+          >
+            {isExcluded ? '🙈' : '👁️'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-screen p-2 sm:p-4 max-w-[1400px] mx-auto flex flex-col gap-4 overflow-hidden">
+      <header className="flex shrink-0 justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+        <h1 className="text-xl font-bold text-gradient tracking-tight">VGC Roster Architect</h1>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setShowCompareModal(true)} className="bg-pink-600 hover:bg-pink-500 text-white text-xs px-3 py-1.5 rounded font-bold shadow transition-all">
+            ⚖️ Comparar Times
+          </button>
+          <button onClick={() => setShowAnalysisModal(true)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded font-bold shadow transition-all">
+            📊 Frequência & Ignorar
+          </button>
+          <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded font-bold shadow transition-all">
+            + Criar Time
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* COLUNA ESQUERDA */}
+        <div className="flex flex-col gap-4 h-full min-h-0">
+          {/* ALL TEAMS */}
+          <section className="glass rounded-lg p-3 border-t-2 border-emerald-500 flex-1 min-h-0 flex flex-col">
+            <h2 className="text-sm font-bold text-emerald-400 mb-2 flex items-center gap-1 shrink-0">
+              📋 Banco de Times ({teams.length})
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+              {teams.map((team, idx) => (
+                <TeamCardRow key={`${team.player_name}-${idx}`} team={team} isActive={sourceTeamName === team.player_name} onSelect={() => setSourceTeamName(prev => prev === team.player_name ? '' : team.player_name)} />
+              ))}
+            </div>
+          </section>
+
+          {/* TRANSITION CALCULATOR */}
+          <section className="glass rounded-lg p-3 border-l-2 border-indigo-500 flex-1 min-h-0 flex flex-col">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-3 gap-2 pb-2 border-b border-slate-800/50 shrink-0">
+              <h2 className="text-sm font-bold text-indigo-400 flex items-center gap-1">💱 Calculadora de Transição VP</h2>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {sourceTeamName ? (
+                  <span>Base: <strong className="text-indigo-400">{sourceTeamName}</strong></span>
+                ) : (
+                  <span className="animate-pulse">Selecione um time base ao lado</span>
+                )}
+              </span>
+            </div>
+            {sourceTeamName ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                {transitionList.map((item, idx) => (
+                  <div key={idx} className="bg-slate-900/50 rounded p-2 border border-slate-800/60 flex items-center justify-between hover:border-indigo-500/50">
+                    <div className="flex flex-col gap-1 flex-1 min-w-0 pr-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-[10px] text-slate-200 truncate">{item.team.player_name}</span>
+                        {item.team.rental_code && <span className="text-[9px] text-indigo-300 font-mono bg-indigo-900/30 px-1 rounded select-all">{item.team.rental_code}</span>}
+                      </div>
+                      <div className="flex gap-0.5">
+                        {item.team.team.map((p, i) => <PokemonIcon key={i} poke={p} />)}
+                      </div>
+                    </div>
+                    <div className="flex flex-col text-right shrink-0 ml-2 whitespace-nowrap">
+                      <span className="text-[10px] text-indigo-400 font-bold">{item.cost.vpCost} VP</span>
+                      <span className={`text-[9px] font-bold ${item.cost.newPokemonCount > 0 ? 'text-green-500' : 'text-amber-500'}`}>{item.cost.newPokemonCount} Diff</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <span className="text-2xl mb-1">👈</span>
+                <p className="text-[11px] text-slate-500 max-w-xs">Clique no botão <strong className="text-indigo-400 bg-slate-900/60 px-1 py-0.5 rounded border border-slate-800">Focar</strong> de qualquer time na lista para calcular as rotas de transição mais baratas para ele.</p>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* COLUNA DIREITA */}
+        <div className="flex flex-col gap-4 h-full min-h-0">
+
+          {/* GLOBAL CHEAPEST TRANSITIONS */}
+          <section className="glass rounded-lg p-3 border-t-2 border-emerald-500 flex-[0.8] min-h-0 flex flex-col">
+            <h2 className="text-sm font-bold text-emerald-400 mb-3 flex items-center gap-1 shrink-0">🏆 Top Transições (Geral)</h2>
+            <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+              {globalTransitions.length === 0 && <p className="text-slate-500 text-[11px]">Nenhuma transição disponível.</p>}
+              {globalTransitions.map((item, idx) => (
+                <div key={idx} className="bg-slate-900/50 rounded p-1.5 border border-slate-800/50 flex flex-col sm:flex-row sm:items-center justify-between hover:border-emerald-500/50 gap-2">
+                  <div className="flex items-center gap-2 flex-1 w-full justify-between sm:justify-start">
+                    <div className="flex flex-col gap-1 min-w-0 pr-2">
+                      <span className="font-bold text-[10px] text-slate-300 truncate">{item.source.player_name}</span>
+                      <div className="flex gap-0.5">
+                        {item.source.team.map((p, i) => <PokemonIcon key={`src-${i}`} poke={p} />)}
+                      </div>
+                    </div>
+
+                    <span className="text-emerald-400 font-black text-sm mx-1">👉</span>
+
+                    <div className="flex flex-col gap-1 min-w-0 pr-2">
+                      <span className="font-bold text-[10px] text-slate-300 truncate">{item.target.player_name}</span>
+                      <div className="flex gap-0.5">
+                        {item.target.team.map((p, i) => <PokemonIcon key={`tgt-${i}`} poke={p} />)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col text-right shrink-0 whitespace-nowrap bg-slate-950 p-1 rounded border border-slate-800/80">
+                    <span className="text-[10px] text-emerald-400 font-bold">{item.cost.vpCost} VP</span>
+                    <span className={`text-[9px] font-bold ${item.cost.newPokemonCount > 0 ? 'text-green-500' : 'text-amber-500'}`}>{item.cost.newPokemonCount} Diff</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+          {/* COMBINATION GENERATOR */}
+          <section className="glass rounded-lg p-3 border-t-2 border-purple-500 flex-[1.2] min-h-0 flex flex-col">
+            <div className="flex justify-between items-center mb-3 shrink-0">
+              <h2 className="text-sm font-bold text-purple-400 flex items-center gap-1">⚛️ Rosters Compatíveis (Até 30 VP)</h2>
+              <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                <span className="text-[10px] text-slate-400">Tam:</span>
+                {[2, 3].map(size => {
+                  const isValid = availableSizes.includes(size);
+                  return (
+                    <button key={size} onClick={() => isValid && setComboSize(size)} disabled={!isValid} title={!isValid ? "Nenhuma combinação deste tamanho" : ""}
+                      className={`w-5 h-5 text-[10px] rounded font-bold transition-colors ${comboSize === size ? 'bg-purple-600 text-white' : isValid ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-700 bg-slate-900/30 cursor-not-allowed border border-slate-800/30 line-through'}`}>
+                      {size}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-1 custom-scrollbar">
+              {combinations.length === 0 && <p className="text-slate-500 text-[11px]">Nenhuma combinação encontrada.</p>}
+              {combinations.map((item, idx) => {
+                const combo = item.combo;
+                const nameCounts = new Map<string, number>();
+                combo.forEach(team => {
+                  team.team.forEach(p => {
+                    if (p.name) nameCounts.set(p.name, (nameCounts.get(p.name) || 0) + 1);
+                  });
+                });
+                const sharedNames = new Set(Array.from(nameCounts.entries()).filter(([_, count]) => count > 1).map(([name]) => name));
+
+                return (
+                  <div key={idx} className="bg-slate-900/30 rounded border border-slate-800 p-2 flex flex-col gap-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[9px] text-purple-500 font-black uppercase">Opção #{idx + 1}</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${item.totalVp === 0 ? 'text-emerald-400 bg-emerald-950/50 border-emerald-900' : 'text-indigo-400 bg-indigo-950/50 border-indigo-900'}`}>{item.totalVp} VP Total</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {combo.map(team => (
+                        <div key={team.player_name} className="flex flex-col gap-1 bg-slate-950 p-1.5 rounded border border-slate-800/50 w-full sm:w-auto">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-slate-300 text-[10px] truncate">{team.player_name}</span>
+                            {team.rental_code && <span className="text-[9px] text-purple-300 font-mono bg-purple-900/30 px-1 rounded select-all">{team.rental_code}</span>}
+                          </div>
+                          <div className="flex gap-0.5">
+                            {team.team.map((p, i) => <PokemonIcon key={i} poke={p} isShared={sharedNames.has(p.name)} />)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+
+          {/* THE BASE: Isolated Teams */}
+          <section className="glass rounded-lg p-3 border-l-2 border-amber-500 shrink-0 max-h-[25vh] min-h-0 flex flex-col">
+            <h2 className="text-sm font-bold text-amber-500 mb-2 flex items-center gap-1 shrink-0">🛡️ A Base (100% Isolados)</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 overflow-y-auto custom-scrollbar pr-1">
+              {isolatedTeams.length === 0 && <p className="text-slate-500 text-[11px]">Nenhum time isolado.</p>}
+              {isolatedTeams.map(team => (
+                <div key={team.player_name} className="bg-slate-900/50 rounded p-1.5 flex flex-col sm:flex-row sm:items-center justify-between border border-slate-800/50 gap-1 sm:gap-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="font-bold text-[10px] text-slate-200 truncate">{team.player_name}</span>
+                    {team.rental_code && <span className="text-[9px] text-red-300 font-mono bg-red-900/30 px-1 rounded select-all">{team.rental_code}</span>}
+                  </div>
+                  <div className="flex gap-0.5 shrink-0">
+                    {team.team.map((p, i) => <PokemonIcon key={i} poke={p} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* Modal Adicionar Time */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAddModal(false)}></div>
+          <div className="relative glass w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100">Criar Time Customizado</h2>
+              </div>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Nome do Treinador</label>
+                <input value={newTeam.player_name} onChange={e => setNewTeam({ ...newTeam, player_name: e.target.value })} placeholder="Ex: Wolfe Glick"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {newTeam.team.map((p, idx) => (
+                  <div key={idx} className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/60">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-blue-500 font-bold text-xs">#{idx + 1}</span>
+                      <input value={p.name} onChange={e => {
+                        const t = [...newTeam.team]; t[idx].name = e.target.value; setNewTeam({ ...newTeam, team: t });
+                      }} placeholder="Pokémon" className="w-full bg-transparent border-b border-slate-800 text-sm font-bold focus:outline-none focus:border-blue-500 py-1" />
+                    </div>
+                    <div className="space-y-2">
+                      <input value={p.item} onChange={e => {
+                        const t = [...newTeam.team]; t[idx].item = e.target.value; setNewTeam({ ...newTeam, team: t });
+                      }} placeholder="Item" className="w-full bg-slate-950/60 text-[11px] px-2 py-1.5 rounded border border-slate-800 focus:outline-none" />
+                      <input value={p.ability} onChange={e => {
+                        const t = [...newTeam.team]; t[idx].ability = e.target.value; setNewTeam({ ...newTeam, team: t });
+                      }} placeholder="Habilidade" className="w-full bg-slate-950/60 text-[11px] px-2 py-1.5 rounded border border-slate-800 focus:outline-none" />
+                      <select value={p.nature || ''} onChange={e => {
+                        const t = [...newTeam.team]; t[idx].nature = e.target.value; setNewTeam({ ...newTeam, team: t });
+                      }} className="w-full bg-slate-950/60 text-[11px] px-2 py-1.5 rounded border border-slate-800 focus:outline-none text-slate-300">
+                        <option value="">Sem Nature (Neutro)</option>
+                        <option value="+atk -spa">Adamant (+Atk -SpA)</option>
+                        <option value="+spe -atk">Jolly (+Spe -Atk)</option>
+                        <option value="+spa -atk">Modest (+SpA -Atk)</option>
+                        <option value="+spe -spa">Timid (+Spe -SpA)</option>
+                        <option value="+def -atk">Bold (+Def -Atk)</option>
+                        <option value="+spd -atk">Calm (+SpD -Atk)</option>
+                        <option value="+def -spa">Impish (+Def -SpA)</option>
+                        <option value="+spd -spa">Careful (+SpD -SpA)</option>
+                        <option value="+atk -spe">Brave (+Atk -Spe)</option>
+                        <option value="+spa -spe">Quiet (+SpA -Spe)</option>
+                        <option value="+def -spe">Relaxed (+Def -Spe)</option>
+                        <option value="+spd -spe">Sassy (+SpD -Spe)</option>
+                      </select>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[0, 1, 2, 3].map(midx => (
+                          <input key={midx} value={p.moves[midx]} onChange={e => {
+                            const t = [...newTeam.team]; t[idx].moves[midx] = e.target.value; setNewTeam({ ...newTeam, team: t });
+                          }} placeholder={`Move ${midx + 1}`} className="bg-slate-950/60 text-[10px] px-2 py-1 rounded border border-slate-800 focus:outline-none" />
+                        ))}
+                      </div>
+
+                      <div className="pt-2">
+                        <div className="text-[9px] text-slate-500 uppercase font-black mb-1">EVs</div>
+                        <div className="grid grid-cols-6 gap-1">
+                          {Object.keys(p.evs).map(stat => (
+                            <div key={stat} className="flex flex-col gap-0.5">
+                              <span className="text-[7px] text-center text-slate-600 uppercase">{stat}</span>
+                              <input type="number" value={(p.evs as any)[stat]} onChange={e => {
+                                const t = [...newTeam.team]; (t[idx].evs as any)[stat] = parseInt(e.target.value) || 0; setNewTeam({ ...newTeam, team: t });
+                              }} className="bg-slate-950 text-[9px] text-center py-1 rounded border border-slate-800 focus:outline-none" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                <button onClick={() => setShowAddModal(false)} className="text-xs text-slate-400 hover:text-white px-4">Cancelar</button>
+                <button onClick={saveNewTeam} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-2 rounded-lg transition-all">
+                  Salvar Time
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Frequência & Ignorar */}
+      {showAnalysisModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAnalysisModal(false)}></div>
+          <div className="relative glass w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl p-6">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-amber-400">📊 Frequência & Isolamento</h2>
+                <p className="text-[11px] text-slate-400 mt-1">Pokémons marcados como <strong>Ignorar</strong> não conectarão times na hora de calcular isolados ou rosters.</p>
+              </div>
+              <button onClick={() => setShowAnalysisModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {pokemonFrequencies.map(([name, count]) => {
+                const isIgnored = ignoredPokemons.includes(name);
+                return (
+                  <label key={name} className={`flex items-center justify-between p-2 rounded border cursor-pointer transition-all ${isIgnored ? 'bg-amber-950/40 border-amber-500/50' : 'bg-slate-900/40 border-slate-800 hover:bg-slate-800/80'}`}>
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" checked={isIgnored} onChange={(e) => {
+                        if (e.target.checked) setIgnoredPokemons(prev => [...prev, name]);
+                        else setIgnoredPokemons(prev => prev.filter(p => p !== name));
+                      }} className="accent-amber-500" />
+                      <div className="flex flex-col">
+                        <span className="font-bold text-[11px] text-slate-200">{name}</span>
+                        <span className="text-[9px] text-slate-500">{count} vezes</span>
+                      </div>
+                    </div>
+                    <img src={getPokeIcon(name)} alt={name} className={`w-6 h-6 object-contain ${isIgnored ? 'opacity-50 grayscale' : ''}`} onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
+                  </label>
+                )
+              })}
+            </div>
+            <div className="flex justify-end pt-4 border-t border-slate-800 mt-4 shrink-0">
+              <button onClick={() => setShowAnalysisModal(false)} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-6 py-2 rounded-lg transition-all">
+                Aplicar Filtros
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal Comparador de Times */}
+      {showCompareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowCompareModal(false)}></div>
+          <div className="relative glass w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-pink-400">⚖️ Comparador Detalhado de Equipes</h2>
+                <p className="text-[11px] text-slate-400 mt-1">Compare os Pokémon lado a lado e veja as diferenças exatas de golpes, itens, habilidades e EVs.</p>
+              </div>
+              <button onClick={() => setShowCompareModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6 mb-6">
+              {/* Time A */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-slate-400">Time A</label>
+                <select value={teamA} onChange={e => setTeamA(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200">
+                  <option value="">Selecione um time...</option>
+                  {teams.map(t => <option key={t.player_name} value={t.player_name} disabled={t.player_name === teamB}>{t.player_name}</option>)}
+                </select>
+              </div>
+              {/* Time B */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-slate-400">Time B</label>
+                <select value={teamB} onChange={e => setTeamB(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200">
+                  <option value="">Selecione um time...</option>
+                  {teams.map(t => <option key={t.player_name} value={t.player_name} disabled={t.player_name === teamA}>{t.player_name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {comparisonData && (
+              <div className="flex flex-col gap-4 mt-2 max-h-[55vh] overflow-y-auto pr-1 custom-scrollbar">
+                {comparisonData.pokemonComparisons.map((item) => (
+                  <PokemonComparisonRow
+                    key={item.name}
+                    name={item.name}
+                    pokeA={item.pokeA}
+                    pokeB={item.pokeB}
+                  />
+                ))}
+              </div>
+            )}
+            {!comparisonData && teamA && teamB && (
+              <div className="text-center py-10 text-slate-500">Buscando Pokémon...</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default App
