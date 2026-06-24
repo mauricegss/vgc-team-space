@@ -38,6 +38,30 @@ const jsonWriterPlugin = (): Plugin => ({
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }))
       }
     })
+
+    server.middlewares.use('/api/copies', async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+      if (req.method !== 'POST') {
+        next()
+        return
+      }
+
+      try {
+        const chunks: Buffer[] = []
+        for await (const chunk of req) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        }
+
+        const copies = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        const filePath = path.resolve(server.config.root, 'copies.json')
+        await fs.writeFile(filePath, JSON.stringify(copies, null, 4) + '\n', 'utf8')
+
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ ok: true }))
+      } catch (error) {
+        res.statusCode = 500
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }))
+      }
+    })
   },
 })
 

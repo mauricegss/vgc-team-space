@@ -475,5 +475,36 @@ export const getPokemonSharingMode = (
     return hasIdenticalBuild ? 'identical' : 'copy';
 };
 
+export const exportToPokepaste = (teamData: TeamData): string => {
+    return teamData.team
+        .map(p => {
+            if (!p.name) return '';
+            let paste = `${p.name}`;
+            if (p.item) paste += ` @ ${p.item}`;
+            paste += '\n';
+            if (p.ability) paste += `Ability: ${p.ability}\n`;
+            paste += `Level: 50\n`;
+
+            const evParts: string[] = [];
+            if (p.evs.hp) evParts.push(`${p.evs.hp} HP`);
+            if (p.evs.atk) evParts.push(`${p.evs.atk} Atk`);
+            if (p.evs.def) evParts.push(`${p.evs.def} Def`);
+            if (p.evs.spa) evParts.push(`${p.evs.spa} SpA`);
+            if (p.evs.spd) evParts.push(`${p.evs.spd} SpD`);
+            if (p.evs.spe) evParts.push(`${p.evs.spe} Spe`);
+            if (evParts.length > 0) paste += `EVs: ${evParts.join(' / ')}\n`;
+
+            if (p.nature) paste += `${p.nature} Nature\n`;
+
+            p.moves.forEach(m => {
+                if (m) paste += `- ${m}\n`;
+            });
+            return paste.trim() + '\n';
+        })
+        .filter(Boolean)
+        .join('\n');
+};
+
+
 
 

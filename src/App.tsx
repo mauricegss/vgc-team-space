@@ -1,220 +1,18 @@
 import { useState, useMemo, useEffect } from 'react';
 import rawData from '../dados-completos.json';
 import type { TeamData, Pokemon } from './types';
-import { findIsolatedTeams, getPokeIcon, calculateTeamTransitionCost, calculatePokemonTransitionCost, parsePokepaste, displayNatureName, normalizeNatureName, calculateAverageBaseCosts, countPokemonVariations, calculateComboTotalVp, areTeamsCompatible, getPokemonSharingMode } from './utils';
+import { findIsolatedTeams, calculateTeamTransitionCost, parsePokepaste, displayNatureName, calculateAverageBaseCosts, countPokemonVariations, calculateComboTotalVp, areTeamsCompatible, getPokemonSharingMode } from './utils';
 
-const STATS: ('hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe')[] = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+// Import refactored components
+import PokemonIcon from './components/PokemonIcon';
+import TeamCardRow from './components/TeamCardRow';
+import AddTeamModal from './components/AddTeamModal';
+import FrequencyModal from './components/FrequencyModal';
+import AverageBaseCostsModal from './components/AverageBaseCostsModal';
+import CompareTeamsModal from './components/CompareTeamsModal';
+import ViewTeamModal from './components/ViewTeamModal';
 
-interface CompareBuildCardProps {
-  team: TeamData;
-  poke: Pokemon;
-  isReference: boolean;
-  onSetReference: () => void;
-  refPoke?: Pokemon;
-  allBuilds: { team: TeamData; poke: Pokemon }[];
-}
 
-const CompareBuildCard = ({ 
-  team, 
-  poke, 
-  isReference, 
-  onSetReference,
-  refPoke,
-  allBuilds
-}: CompareBuildCardProps) => {
-  // Transition cost compared to reference
-  const costTo = refPoke && !isReference ? calculatePokemonTransitionCost(refPoke, poke) : 0;
-  const costFrom = refPoke && !isReference ? calculatePokemonTransitionCost(poke, refPoke) : 0;
-  
-  // Find other compatible builds (transition <= 30 VP in either direction)
-  const compatibleWith = useMemo(() => {
-    const list: { player_name: string; costTo: number; costFrom: number }[] = [];
-    allBuilds.forEach(item => {
-      if (item.team.player_name === team.player_name) return;
-      const cTo = calculatePokemonTransitionCost(poke, item.poke);
-      const cFrom = calculatePokemonTransitionCost(item.poke, poke);
-      if (cTo <= 30 || cFrom <= 30) {
-        list.push({
-          player_name: item.team.player_name,
-          costTo: cTo,
-          costFrom: cFrom
-        });
-      }
-    });
-    return list;
-  }, [allBuilds, poke, team.player_name]);
-
-  // Exact changes breakdown from reference
-  const transitionBreakdown = useMemo(() => {
-    if (!refPoke || isReference) return [];
-    const items: string[] = [];
-    if (refPoke.ability !== poke.ability) {
-      items.push(`Trocar Habilidade (${refPoke.ability || 'Sem'} ➔ ${poke.ability || 'Sem'}): +500 VP`);
-    }
-    if (normalizeNatureName(refPoke.nature) !== normalizeNatureName(poke.nature)) {
-      items.push(`Trocar Nature (${displayNatureName(refPoke.nature)} ➔ ${displayNatureName(poke.nature)}): +500 VP`);
-    }
-    const refMoves = refPoke.moves.filter(Boolean);
-    const pokeMoves = poke.moves.filter(Boolean);
-    const movesToLearn = pokeMoves.filter(m => !refMoves.includes(m));
-    if (movesToLearn.length > 0) {
-      items.push(`Aprender golpes (${movesToLearn.join(', ')}): +${movesToLearn.length * 250} VP`);
-    }
-    STATS.forEach(s => {
-      if (poke.evs[s] > refPoke.evs[s]) {
-        const diff = poke.evs[s] - refPoke.evs[s];
-        items.push(`+${diff} EVs em ${s.toUpperCase()}: +${diff * 5} VP`);
-      }
-    });
-    return items;
-  }, [refPoke, poke, isReference]);
-
-  return (
-    <div className={`p-4 rounded-xl border transition-all flex flex-col gap-3 ${
-      isReference 
-        ? 'bg-pink-950/15 border-pink-500/50 shadow-md shadow-pink-500/5' 
-        : (costTo <= 30 || costFrom <= 30)
-          ? 'bg-emerald-950/10 border-emerald-500/40 hover:border-emerald-500/60 shadow-sm'
-          : 'bg-slate-900/40 border-slate-800/80 hover:border-slate-700/50'
-    }`}>
-      {/* Card Header */}
-      <div className="flex items-center justify-between pb-2 border-b border-slate-800/60">
-        <div className="min-w-0">
-          <span className="font-bold text-sm text-slate-100 truncate block">{team.player_name}</span>
-          {team.rental_code && (
-            <span className="text-[10px] text-indigo-300 font-mono bg-indigo-900/30 px-1.5 py-0.5 rounded select-all mt-1 inline-block">
-              {team.rental_code}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {isReference ? (
-            <span className="text-[10px] bg-pink-600 text-white font-bold px-2 py-0.5 rounded">
-              ⭐ Referência
-            </span>
-          ) : (
-            <button 
-              onClick={onSetReference}
-              className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-350 px-2 py-0.5 rounded transition-colors cursor-pointer"
-            >
-              Definir Referência
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Build Details */}
-      <div className="grid grid-cols-2 gap-3 text-[11px]">
-        <div>
-          <span className="text-slate-500 font-bold block text-[9px] uppercase">Item</span>
-          <span className="font-mono text-slate-300 truncate block">{poke.item || 'Nenhum'}</span>
-        </div>
-        <div>
-          <span className="text-slate-500 font-bold block text-[9px] uppercase">Habilidade</span>
-          <span className="text-slate-300 truncate block">{poke.ability || 'Nenhuma'}</span>
-        </div>
-        <div className="col-span-2">
-          <span className="text-slate-500 font-bold block text-[9px] uppercase">Nature</span>
-          <span className="text-slate-300">{displayNatureName(poke.nature)}</span>
-        </div>
-        <div className="col-span-2">
-          <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">Golpes</span>
-          <div className="grid grid-cols-2 gap-1 bg-slate-950/40 p-1.5 rounded border border-slate-900">
-            {poke.moves.map((move, i) => (
-              <span key={i} className="text-slate-300 truncate font-medium">
-                {move || <span className="text-slate-700 italic">• Vazio</span>}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="col-span-2">
-          <span className="text-slate-500 font-bold block text-[9px] uppercase mb-1">EVs</span>
-          <div className="grid grid-cols-6 gap-0.5">
-            {STATS.map(s => (
-              <div key={s} className="bg-slate-950/60 rounded p-1 text-center border border-slate-900">
-                <div className="text-[7px] uppercase text-slate-500 font-bold">{s}</div>
-                <div className="text-[9.5px] text-slate-300 font-mono font-semibold">{poke.evs[s]}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Transition signaling */}
-      {!isReference && refPoke && (
-        <div className="mt-2 pt-2 border-t border-slate-800/40 text-[10px]">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-slate-500">Transição:</span>
-              <div className="flex gap-2 text-right">
-                <span className={`font-mono font-bold ${costTo <= 30 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  Ida: {costTo} VP
-                </span>
-                <span className={`font-mono font-bold ${costFrom <= 30 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  Volta: {costFrom} VP
-                </span>
-              </div>
-            </div>
-            
-            {/* If either cost is <= 30, signal with a badge */}
-            {(costTo <= 30 || costFrom <= 30) && (
-              <div className="bg-emerald-950/30 text-emerald-400 border border-emerald-900/50 rounded p-1.5 font-bold flex items-center justify-center gap-1">
-                <span>⚡ Transição barata (≤ 30 VP)</span>
-              </div>
-            )}
-
-            {/* List other teams with transition cost <= 30 VP */}
-            {compatibleWith.length > 0 && (
-              <div className="mt-1 bg-slate-950/40 border border-slate-900 rounded p-1.5 flex flex-col gap-0.5">
-                <span className="text-[8.5px] text-slate-500 uppercase font-bold">Compatibilidades (≤ 30 VP):</span>
-                {compatibleWith.map(comp => (
-                  <div key={comp.player_name} className="flex justify-between items-center text-[9px] text-emerald-400/90">
-                    <span className="font-semibold">{comp.player_name}</span>
-                    <span className="font-mono text-[8.5px]">
-                      {comp.costTo <= 30 ? `→ ${comp.costTo} VP` : ''} 
-                      {comp.costTo <= 30 && comp.costFrom <= 30 ? ' | ' : ''}
-                      {comp.costFrom <= 30 ? `← ${comp.costFrom} VP` : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Transition breakdown */}
-            {transitionBreakdown.length > 0 && (
-              <details className="text-[9px] text-slate-500 mt-1 cursor-pointer">
-                <summary className="hover:text-slate-400 transition-colors">Ver detalhes da transição...</summary>
-                <ul className="list-disc pl-4 mt-1 space-y-0.5">
-                  {transitionBreakdown.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </div>
-        </div>
-      )}
-
-      {isReference && compatibleWith.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-slate-800/40 text-[10px]">
-          <div className="bg-slate-950/40 border border-slate-900 rounded p-1.5 flex flex-col gap-0.5">
-            <span className="text-[8.5px] text-slate-500 uppercase font-bold">Compatibilidades da Referência (≤ 30 VP):</span>
-            {compatibleWith.map(comp => (
-              <div key={comp.player_name} className="flex justify-between items-center text-[9px] text-emerald-400/90">
-                <span className="font-semibold">{comp.player_name}</span>
-                <span className="font-mono text-[8.5px]">
-                  {comp.costTo <= 30 ? `→ ${comp.costTo} VP` : ''} 
-                  {comp.costTo <= 30 && comp.costFrom <= 30 ? ' | ' : ''}
-                  {comp.costFrom <= 30 ? `← ${comp.costFrom} VP` : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const normalizeSelectedTeamSlots = (value: unknown) => {
   const slots = Array.isArray(value) ? value : [];
@@ -233,10 +31,21 @@ function App() {
   const [teams, setTeams] = useState<TeamData[]>(() => {
     const initialData = Array.isArray(rawData) ? rawData : (rawData as { default?: TeamData[] }).default || [];
     try {
+      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
       const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
+      
+      let combined = [...initialData, ...custom];
+      // Deduplicate by player_name (custom teams override initial teams with same name)
+      const uniqueTeamsMap = new Map<string, TeamData>();
+      combined.forEach(t => {
+        uniqueTeamsMap.set(t.player_name, t);
+      });
+      combined = Array.from(uniqueTeamsMap.values());
+
       if (deleted.length > 0) {
-        return (initialData as TeamData[]).filter(t => !deleted.includes(t.player_name));
+        return combined.filter(t => !deleted.includes(t.player_name));
       }
+      return combined;
     } catch {
       // ignore
     }
@@ -254,12 +63,6 @@ function App() {
   });
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [newRentalCode, setNewRentalCode] = useState('');
-  const [pasteInput, setPasteInput] = useState('');
-  const [pasteError, setPasteError] = useState('');
-  const [isSavingTeam, setIsSavingTeam] = useState(false);
-  const parsedPasteTeam = useMemo(() => parsePokepaste(pasteInput), [pasteInput]);
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
   const [pokemonCopies, setPokemonCopies] = useState<Record<string, number>>(() => {
     try {
@@ -276,7 +79,6 @@ function App() {
   const [teamA, setTeamA] = useState<string>('');
   const [teamB, setTeamB] = useState<string>('');
   const [viewingTeam, setViewingTeam] = useState<TeamData | null>(null);
-  const [isCopied, setIsCopied] = useState(false);
 
   const [excludedTeamNames, setExcludedTeamNames] = useState<string[]>(() => {
     try {
@@ -303,7 +105,7 @@ function App() {
   };
 
   useEffect(() => {
-    localStorage.removeItem('vgc_custom_teams');
+    // Clean up deprecated storage keys but keep vgc_custom_teams
     localStorage.removeItem('vgc_full_teams_json');
   }, []);
 
@@ -327,86 +129,80 @@ function App() {
     }))
   );
 
-  const exportToPokepaste = (teamData: TeamData) => {
-    return teamData.team
-      .map(p => {
-        if (!p.name) return '';
-        let paste = `${p.name}`;
-        if (p.item) paste += ` @ ${p.item}`;
-        paste += '\n';
-        if (p.ability) paste += `Ability: ${p.ability}\n`;
-        paste += `Level: 50\n`;
-        
-        const evParts: string[] = [];
-        if (p.evs.hp) evParts.push(`${p.evs.hp} HP`);
-        if (p.evs.atk) evParts.push(`${p.evs.atk} Atk`);
-        if (p.evs.def) evParts.push(`${p.evs.def} Def`);
-        if (p.evs.spa) evParts.push(`${p.evs.spa} SpA`);
-        if (p.evs.spd) evParts.push(`${p.evs.spd} SpD`);
-        if (p.evs.spe) evParts.push(`${p.evs.spe} Spe`);
-        if (evParts.length > 0) paste += `EVs: ${evParts.join(' / ')}\n`;
-        
-        if (p.nature) paste += `${p.nature} Nature\n`;
-        
-        p.moves.forEach(m => {
-          if (m) paste += `- ${m}\n`;
-        });
-        return paste.trim() + '\n';
-      })
-      .filter(Boolean)
-      .join('\n');
-  };
 
   const deleteTeam = async (playerName: string) => {
     if (!window.confirm(`Tem certeza de que deseja excluir permanentemente o time de "${playerName}"?`)) {
       return;
     }
     const nextTeams = teams.filter(t => t.player_name !== playerName);
+
+    // Save to deleted list in localStorage
     try {
-      const response = await fetch('/api/teams', {
+      const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
+      if (!deleted.includes(playerName)) {
+        deleted.push(playerName);
+        localStorage.setItem('vgc_deleted_teams', JSON.stringify(deleted));
+      }
+      
+      // Also remove from custom teams if it was there
+      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
+      const filteredCustom = custom.filter((t: TeamData) => t.player_name !== playerName);
+      localStorage.setItem('vgc_custom_teams', JSON.stringify(filteredCustom));
+    } catch (e) {
+      console.error("Erro ao salvar exclusão no LocalStorage:", e);
+    }
+
+    setTeams(nextTeams);
+    setViewingTeam(null);
+    setSelectedTeams(prev => prev.map(name => name === playerName ? '' : name));
+    if (teamA === playerName) setTeamA('');
+    if (teamB === playerName) setTeamB('');
+    if (averageTeamA === playerName) setAverageTeamA('');
+    if (averageTeamB === playerName) setAverageTeamB('');
+
+    try {
+      await fetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleanTeamsForJson(nextTeams)),
       });
-
-      if (!response.ok) {
-        throw new Error('Não foi possível excluir o time do dados-completos.json.');
-      }
-
-      setTeams(nextTeams);
-      setViewingTeam(null);
-      setSelectedTeams(prev => prev.map(name => name === playerName ? '' : name));
-      if (teamA === playerName) setTeamA('');
-      if (teamB === playerName) setTeamB('');
-      if (averageTeamA === playerName) setAverageTeamA('');
-      if (averageTeamB === playerName) setAverageTeamB('');
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Erro ao excluir do JSON.');
+    } catch {
+      console.warn('Não foi possível sincronizar a exclusão com o servidor. A alteração foi salva localmente no navegador.');
     }
   };
 
-  const saveNewTeam = async () => {
-    if (isSavingTeam) return;
-    const playerName = newTeamName.trim();
-    const parsedTeam = parsePokepaste(pasteInput);
-    if (!playerName) {
-      setPasteError('Informe um nome para identificar o time.');
-      return;
-    }
+  const handleSaveTeam = async (playerName: string, pasteText: string, rentalCode: string): Promise<string | null> => {
+    const parsedTeam = parsePokepaste(pasteText);
     if (parsedTeam.length !== 6) {
-      setPasteError(`Cole um Pokepaste com 6 Pokemon. Encontrei ${parsedTeam.length}.`);
-      return;
+      return `Cole um Pokepaste com 6 Pokemon. Encontrei ${parsedTeam.length}.`;
     }
 
     const newTeam: TeamData = {
       player_name: playerName,
       team: parsedTeam,
     };
-    if (newRentalCode.trim()) {
-      newTeam.rental_code = newRentalCode.trim();
+    if (rentalCode.trim()) {
+      newTeam.rental_code = rentalCode.trim();
     }
     const nextTeams = [...teams, newTeam];
-    setIsSavingTeam(true);
+
+    // Save to custom teams in localStorage
+    try {
+      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
+      // Avoid duplicate names in custom
+      const filteredCustom = custom.filter((t: TeamData) => t.player_name !== playerName);
+      filteredCustom.push(newTeam);
+      localStorage.setItem('vgc_custom_teams', JSON.stringify(filteredCustom));
+      
+      // If it was deleted before, undelete it
+      const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
+      const filteredDeleted = deleted.filter((name: string) => name !== playerName);
+      localStorage.setItem('vgc_deleted_teams', JSON.stringify(filteredDeleted));
+    } catch (e) {
+      console.error("Erro ao salvar time no LocalStorage:", e);
+    }
+
+    setTeams(nextTeams);
 
     try {
       const response = await fetch('/api/teams', {
@@ -414,22 +210,14 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleanTeamsForJson(nextTeams)),
       });
-
       if (!response.ok) {
         throw new Error('Nao foi possivel escrever o dados-completos.json.');
       }
-
-      setTeams(nextTeams);
-      setNewTeamName('');
-      setNewRentalCode('');
-      setPasteInput('');
-      setPasteError('');
-      setShowAddModal(false);
-    } catch (error) {
-      setPasteError(error instanceof Error ? error.message : 'Erro ao salvar no JSON.');
-    } finally {
-      setIsSavingTeam(false);
+    } catch {
+      console.warn('Não foi possível sincronizar o novo time com o servidor. O time foi salvo localmente no seu navegador.');
     }
+
+    return null; // success
   };
 
   // Computed data
@@ -753,123 +541,12 @@ function App() {
   const [comparePokemon, setComparePokemon] = useState<string>('');
   const [compareReferenceTeam, setCompareReferenceTeam] = useState<string>('');
 
-  const activeComparePokemon = useMemo(() => {
-    return comparePokemon || (pokemonFrequencies.length > 0 ? pokemonFrequencies[0].name : '');
-  }, [comparePokemon, pokemonFrequencies]);
-
-  const activeReferenceTeam = useMemo(() => {
-    if (compareReferenceTeam) return compareReferenceTeam;
-    if (!activeComparePokemon) return '';
-    const firstTeam = activeTeams.find(t => t.team.some(p => p.name === activeComparePokemon));
-    return firstTeam ? firstTeam.player_name : '';
-  }, [compareReferenceTeam, activeComparePokemon, activeTeams]);
-
-  const teamsWithComparePokemon = useMemo(() => {
-    if (!activeComparePokemon) return [];
-    return activeTeams.filter(t => t.team.some(p => p.name === activeComparePokemon));
-  }, [activeTeams, activeComparePokemon]);
-
-  // comparisonData removed
 
   const averageAnalysisData = useMemo(() => {
     const selected = [averageTeamA, averageTeamB].filter(Boolean);
     if (!showAverageModal || selected.length === 0) return [];
     return calculateAverageBaseCosts(activeTeams, selected, pokemonCopies);
   }, [activeTeams, averageTeamA, averageTeamB, showAverageModal, pokemonCopies]);
-
-  const PokemonIcon = ({ 
-    poke, 
-    sharingMode 
-  }: { 
-    poke: { name: string; nature?: string }; 
-    sharingMode?: 'identical' | 'copy' | null;
-  }) => {
-    const ringClass = sharingMode === 'identical'
-      ? 'ring-2 ring-emerald-400 bg-emerald-400/20 rounded-full'
-      : sharingMode === 'copy'
-        ? 'ring-2 ring-amber-500 bg-amber-500/20 rounded-full'
-        : '';
-
-    const handleMouseEnter = (e: React.MouseEvent) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      setActiveTooltip({
-        name: poke.name,
-        nature: poke.nature,
-        sharingMode,
-        x: rect.left + rect.width / 2,
-        y: rect.top
-      });
-    };
-
-    const handleMouseLeave = () => {
-      setActiveTooltip(null);
-    };
-
-    return (
-      <div 
-        className={`relative group/icon ${ringClass}`} 
-        title={poke.nature ? `${poke.name} (${displayNatureName(poke.nature)})` : poke.name}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-        <img src={getPokeIcon(poke.name)} alt={poke.name} className="w-6 h-6 object-contain filter drop-shadow-md pointer-events-none"
-          onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
-      </div>
-    );
-  };
-
-  const TeamCardRow = ({ team }: { team: TeamData }) => {
-    const isExcluded = excludedTeamNames.includes(team.player_name);
-    const isIsolated = isolatedTeams.some(iso => iso.player_name === team.player_name);
-
-    return (
-      <div className={`flex flex-col justify-between p-2 px-2.5 rounded-lg border transition-all w-full h-[65px] ${isExcluded
-          ? 'opacity-40 bg-slate-950/20 border-slate-900 shadow-none'
-          : isIsolated
-            ? 'bg-amber-950/15 border-amber-500/30 hover:bg-amber-950/25 hover:border-amber-500/40 shadow-sm shadow-amber-500/5'
-            : 'bg-indigo-950/15 border-indigo-900/20 hover:bg-indigo-950/30 hover:border-indigo-900/35'
-        }`}>
-        {/* Top Row: Player Name and Rental Code */}
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <span className="font-bold text-xs text-slate-200 truncate">{team.player_name}</span>
-          {team.rental_code && (
-            <span className="text-[10px] text-indigo-300 font-mono bg-indigo-900/30 px-1.5 py-0.5 rounded select-all shrink-0 max-w-[110px] truncate" title={team.rental_code}>
-              {team.rental_code}
-            </span>
-          )}
-        </div>
-
-        {/* Bottom Row: Pokémon Icons and Actions */}
-        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/30">
-          <div className="flex gap-0.5 shrink-0">
-            {team.team.map((p, i) => <PokemonIcon key={i} poke={p} />)}
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewingTeam(team);
-              }}
-              className="text-[10px] p-0.5 rounded hover:bg-slate-800/80 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-              title="Visualizar time completo"
-            >
-              🔍
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleExcludeTeam(team.player_name);
-              }}
-              className={`text-[9px] p-0.5 rounded hover:bg-slate-800/80 transition-colors cursor-pointer shrink-0 ${isExcluded ? 'text-red-400 hover:text-red-300' : 'text-slate-500 hover:text-slate-350'}`}
-              title={isExcluded ? "Incluir time nos cálculos" : "Omitir time dos cálculos"}
-            >
-              {isExcluded ? '🙈' : '👁️'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="h-screen p-2 sm:p-4 max-w-350 mx-auto flex flex-col gap-4 overflow-hidden">
@@ -899,7 +576,15 @@ function App() {
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 flex-1 overflow-y-auto pr-1 custom-scrollbar">
             {orderedTeams.map((team, idx) => (
-              <TeamCardRow key={`${team.player_name}-${idx}`} team={team} />
+              <TeamCardRow 
+                key={`${team.player_name}-${idx}`} 
+                team={team} 
+                isExcluded={excludedTeamNames.includes(team.player_name)}
+                isIsolated={isolatedTeams.some(iso => iso.player_name === team.player_name)}
+                toggleExcludeTeam={toggleExcludeTeam}
+                setViewingTeam={setViewingTeam}
+                setActiveTooltip={setActiveTooltip}
+              />
             ))}
             {Array.from({ length: Math.max(0, 18 - orderedTeams.length) }).map((_, idx) => (
               <div
@@ -986,7 +671,7 @@ function App() {
                       </div>
                       <div className="flex gap-0.5 shrink-0">
                         {team.team.map((p, i) => (
-                          <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} />
+                          <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} setActiveTooltip={setActiveTooltip} />
                         ))}
                       </div>
                     </div>
@@ -1032,7 +717,7 @@ function App() {
                               <span className="font-bold text-xs text-slate-200 truncate">{teamA.player_name}</span>
                               <div className="flex gap-0.5 shrink-0">
                                 {teamA.team.map((p, i) => (
-                                  <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, teamA, combo)} />
+                                  <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, teamA, combo)} setActiveTooltip={setActiveTooltip} />
                                 ))}
                               </div>
                             </div>
@@ -1042,7 +727,7 @@ function App() {
                                 <span className="font-bold text-xs text-slate-200 truncate">{teamB.player_name}</span>
                                 <div className="flex gap-0.5 shrink-0">
                                   {teamB.team.map((p, i) => (
-                                    <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, teamB, combo)} />
+                                    <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, teamB, combo)} setActiveTooltip={setActiveTooltip} />
                                   ))}
                                 </div>
                               </div>
@@ -1139,7 +824,7 @@ function App() {
                         </div>
                         <div className="flex gap-0.5 shrink-0">
                           {team.team.map((p, i) => (
-                            <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} />
+                            <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} setActiveTooltip={setActiveTooltip} />
                           ))}
                         </div>
                       </div>
@@ -1190,7 +875,7 @@ function App() {
                             </span>
                             <div className="flex gap-0.5 shrink-0 opacity-80">
                               {t.team.map((p, i) => (
-                                <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, t, combo)} />
+                                <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, t, combo)} setActiveTooltip={setActiveTooltip} />
                               ))}
                             </div>
                           </div>
@@ -1247,7 +932,7 @@ function App() {
                             </span>
                             <div className="flex gap-0.5 shrink-0 opacity-80">
                               {t.team.map((p, i) => (
-                                <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, t, combo)} />
+                                <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, t, combo)} setActiveTooltip={setActiveTooltip} />
                               ))}
                             </div>
                           </div>
@@ -1333,7 +1018,7 @@ function App() {
                         </div>
                         <div className="flex gap-0.5 shrink-0">
                           {team.team.map((p, i) => (
-                            <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} />
+                            <PokemonIcon key={i} poke={p} sharingMode={getPokemonSharingMode(p, team, selectedComboTeams)} setActiveTooltip={setActiveTooltip} />
                           ))}
                         </div>
                       </div>
@@ -1371,7 +1056,7 @@ function App() {
                           <div className="flex items-center justify-between gap-1 w-full">
                             <div className="flex gap-0.5 shrink-0 opacity-80">
                               {item.team.team.map((p, i) => (
-                                <PokemonIcon key={i} poke={p} />
+                                <PokemonIcon key={i} poke={p} setActiveTooltip={setActiveTooltip} />
                               ))}
                             </div>
                           </div>
@@ -1398,431 +1083,48 @@ function App() {
         </section>
       </div>
 
-      {/* Modal Adicionar Time */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAddModal(false)}></div>
-          <div className="relative glass w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-lg shadow-2xl p-5">
-            <div className="flex justify-between items-center mb-5">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100">Importar Time</h2>
-              </div>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white">x</button>
-            </div>
+      <AddTeamModal 
+        isOpen={showAddModal} 
+        onClose={() => setShowAddModal(false)} 
+        onSave={handleSaveTeam} 
+      />
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-[240px_220px_1fr] gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Nome do Jogador</label>
-                  <input value={newTeamName} onChange={e => {
-                    setNewTeamName(e.target.value);
-                    if (pasteError) setPasteError('');
-                  }} placeholder="Ex: Wolfe Glick"
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Rental Code</label>
-                  <input value={newRentalCode} onChange={e => setNewRentalCode(e.target.value.toUpperCase())} placeholder="Ex: H7HM18T977"
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm font-mono text-slate-200 focus:outline-none focus:border-blue-500" />
-                </div>
-                <div className="flex items-end">
-                  <span className={"text-xs font-bold px-2 py-1 rounded border " + (parsedPasteTeam.length === 6 ? "text-emerald-400 bg-emerald-950/30 border-emerald-900/60" : "text-slate-400 bg-slate-950 border-slate-800")}>
-                    {parsedPasteTeam.length}/6 Pokemon lidos
-                  </span>
-                </div>
-              </div>
+      <FrequencyModal 
+        isOpen={showAnalysisModal} 
+        onClose={() => setShowAnalysisModal(false)} 
+        pokemonFrequencies={pokemonFrequencies} 
+        pokemonCopies={pokemonCopies} 
+        setPokemonCopies={setPokemonCopies} 
+      />
 
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.15fr] gap-4">
-                <div className="flex flex-col gap-2">
-                  <label className="block text-xs font-bold text-slate-400 uppercase">Pokepaste</label>
-                  <textarea
-                    value={pasteInput}
-                    onChange={e => {
-                      setPasteInput(e.target.value);
-                      if (pasteError) setPasteError('');
-                    }}
-                    placeholder={"Aerodactyl @ Aerodactylite\nAbility: Unnerve\nLevel: 50\nEVs: 12 HP / 12 Atk / 9 Def / 1 SpD / 32 Spe\nJolly Nature\n- Rock Slide\n- Dual Wingbeat\n- Tailwind\n- Protect"}
-                    className="min-h-107.5 w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 font-mono text-xs leading-relaxed text-slate-200 focus:outline-none focus:border-blue-500 custom-scrollbar"
-                  />
-                  {pasteError && <p className="text-xs text-red-400">{pasteError}</p>}
-                </div>
+      <AverageBaseCostsModal 
+        isOpen={showAverageModal} 
+        onClose={() => setShowAverageModal(false)} 
+        activeTeams={activeTeams} 
+        averageTeamA={averageTeamA} 
+        averageTeamB={averageTeamB} 
+        setAverageTeamA={setAverageTeamA} 
+        setAverageTeamB={setAverageTeamB} 
+        averageAnalysisData={averageAnalysisData} 
+      />
 
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-400 uppercase">Preview</span>
-                    <span className="text-[10px] text-slate-500">Item, habilidade, nature, EVs e golpes</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-107.5 overflow-y-auto pr-1 custom-scrollbar">
-                    {parsedPasteTeam.length === 0 ? (
-                      <div className="sm:col-span-2 bg-slate-950/50 border border-dashed border-slate-800 rounded p-6 text-center text-sm text-slate-500">
-                        Cole o texto do Pokepaste para ver o preview.
-                      </div>
-                    ) : (
-                      parsedPasteTeam.map((p, idx) => (
-                        <div key={p.name + "-" + idx} className="bg-slate-900/35 border border-slate-800 rounded p-3">
-                          <div className="flex items-start gap-2 mb-2">
-                            <img src={getPokeIcon(p.name)} alt={p.name} className="w-8 h-8 object-contain shrink-0" onError={(e) => (e.currentTarget.src = "https://r2.limitlesstcg.net/pokemon/gen9/unown.png")} />
-                            <div className="min-w-0">
-                              <div className="font-bold text-sm text-slate-100 truncate">{p.name}</div>
-                              <div className="text-[10px] text-slate-400 truncate">{p.item || "Sem item"}</div>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
-                            <div>
-                              <span className="block uppercase font-bold text-slate-500">Ability</span>
-                              <span className="text-slate-300">{p.ability || "-"}</span>
-                            </div>
-                            <div>
-                              <span className="block uppercase font-bold text-slate-500">Nature</span>
-                              <span className="text-slate-300">{displayNatureName(p.nature)}</span>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-6 gap-1 mb-2">
-                            {(["hp", "atk", "def", "spa", "spd", "spe"] as const).map(stat => (
-                              <div key={stat} className="bg-slate-950/70 rounded px-1 py-0.5 text-center">
-                                <div className="text-[7px] uppercase text-slate-500 font-bold">{stat}</div>
-                                <div className="text-[9px] text-slate-300 font-mono">{p.evs[stat]}</div>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="grid grid-cols-2 gap-1">
-                            {p.moves.map((move, midx) => (
-                              <span key={midx} className="bg-slate-950/50 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-300 truncate">
-                                {move || "Vazio"}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
+      <CompareTeamsModal 
+        isOpen={showCompareModal} 
+        onClose={() => setShowCompareModal(false)} 
+        activeTeams={activeTeams} 
+        pokemonFrequencies={pokemonFrequencies} 
+        comparePokemon={comparePokemon} 
+        setComparePokemon={setComparePokemon} 
+        compareReferenceTeam={compareReferenceTeam} 
+        setCompareReferenceTeam={setCompareReferenceTeam} 
+      />
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-                <button onClick={() => setShowAddModal(false)} className="text-xs text-slate-400 hover:text-white px-4">Cancelar</button>
-                <button onClick={saveNewTeam} disabled={isSavingTeam} className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-white text-xs font-bold px-6 py-2 rounded transition-all">
-                  {isSavingTeam ? 'Salvando...' : 'Importar Time'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Modal Frequência & Ignorar */}
-      {showAnalysisModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAnalysisModal(false)}></div>
-          <div className="relative glass w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl shadow-2xl p-6">
-            <div className="flex justify-between items-center mb-4 shrink-0">
-              <div>
-                <h2 className="text-xl font-bold text-blue-400">📊 Frequência & Cópias</h2>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Ajuste o número de <strong>Cópias</strong> se você possui múltiplas cópias físicas do mesmo Pokémon (por exemplo, possuir 2 cópias permite usar 2 builds diferentes dele no mesmo trio sem custo de transição).
-                </p>
-              </div>
-              <button onClick={() => setShowAnalysisModal(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {pokemonFrequencies.map(({ name, count, variations }) => {
-                const copies = pokemonCopies[name] || 1;
-                return (
-                  <div key={name} className={`flex items-center justify-between p-2 rounded border transition-all ${copies > 1 ? 'bg-blue-950/40 border-blue-500/50' : 'bg-slate-900/40 border-slate-800 hover:bg-slate-800/80'}`}>
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <img src={getPokeIcon(name)} alt={name} className="w-6 h-6 object-contain shrink-0" onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-bold text-[11px] text-slate-200 truncate">{name}</span>
-                        <span className="text-[9px] text-slate-500 whitespace-nowrap">
-                          {count} {count === 1 ? 'vez' : 'vezes'} • {variations} {variations === 1 ? 'variação' : 'variações'}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-slate-950/45 p-1 px-2.5 rounded-lg border border-slate-800/60 shrink-0">
-                      <span className="text-[10px] text-slate-400 font-bold">Cópias:</span>
-                      <button type="button" onClick={() => {
-                        const current = pokemonCopies[name] || 1;
-                        if (current > 1) {
-                          setPokemonCopies(prev => {
-                            const next = { ...prev };
-                            if (current === 2) {
-                              delete next[name];
-                            } else {
-                              next[name] = current - 1;
-                            }
-                            return next;
-                          });
-                        }
-                      }} className="w-4 h-4 flex items-center justify-center bg-slate-800 text-[10px] text-slate-355 rounded hover:bg-slate-700 cursor-pointer">-</button>
-                      <span className={`text-[10px] font-mono font-bold w-3 text-center ${copies > 1 ? 'text-blue-400 font-extrabold' : 'text-slate-450'}`}>{copies}</span>
-                      <button type="button" onClick={() => {
-                        const current = pokemonCopies[name] || 1;
-                        setPokemonCopies(prev => ({
-                          ...prev,
-                          [name]: current + 1
-                        }));
-                      }} className="w-4 h-4 flex items-center justify-center bg-slate-800 text-[10px] text-slate-355 rounded hover:bg-slate-700 cursor-pointer">+</button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="flex justify-end pt-4 border-t border-slate-800 mt-4 shrink-0">
-              <button onClick={() => setShowAnalysisModal(false)} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-2 rounded-lg transition-all">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Modal Comparador de Times */}
-      {showAverageModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowAverageModal(false)}></div>
-          <div className="relative glass w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg shadow-2xl p-5">
-            <div className="flex justify-between items-center mb-5">
-              <div>
-                <h2 className="text-lg font-bold text-cyan-400">Média contra a Base</h2>
-                <p className="text-[11px] text-slate-400 mt-1">Calcula a média de VP de cada Pokémon contra todos os outros times, excluindo os dois selecionados da base.</p>
-              </div>
-              <button onClick={() => setShowAverageModal(false)} className="text-slate-400 hover:text-white">x</button>
-            </div>
+      <ViewTeamModal 
+        viewingTeam={viewingTeam} 
+        onClose={() => setViewingTeam(null)} 
+        deleteTeam={deleteTeam} 
+      />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold text-slate-400 uppercase">Time 1</label>
-                <select value={averageTeamA} onChange={e => setAverageTeamA(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200">
-                  <option value="">Selecione um time...</option>
-                  {activeTeams.map(t => <option key={t.player_name} value={t.player_name} disabled={t.player_name === averageTeamB}>{t.player_name}</option>)}
-                </select>
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold text-slate-400 uppercase">Time 2</label>
-                <select value={averageTeamB} onChange={e => setAverageTeamB(e.target.value)} className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200">
-                  <option value="">Selecione um time...</option>
-                  {activeTeams.map(t => <option key={t.player_name} value={t.player_name} disabled={t.player_name === averageTeamA}>{t.player_name}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {averageAnalysisData.length === 0 ? (
-                <div className="md:col-span-2 bg-slate-950/50 border border-dashed border-slate-800 rounded p-8 text-center text-sm text-slate-500">
-                  Selecione pelo menos um time para calcular.
-                </div>
-              ) : (
-                averageAnalysisData.map(result => (
-                  <div key={result.team.player_name} className="bg-slate-900/35 border border-slate-800 rounded p-3">
-                    <div className="flex items-start justify-between gap-3 mb-3 pb-2 border-b border-slate-800">
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-sm text-slate-100 truncate">{result.team.player_name}</h3>
-                        {result.team.rental_code && <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/30 px-1 rounded">{result.team.rental_code}</span>}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-cyan-400 font-bold text-sm">{result.teamTotal.toFixed(2)} VP</div>
-                        <div className="text-[9px] text-slate-500">{result.baseTeamCount} na base</div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      {result.pokemonBreakdown.map(item => (
-                        <div key={item.pokemon} className="flex items-center justify-between gap-2 bg-slate-950/50 border border-slate-800 rounded px-2 py-1.5">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <img src={getPokeIcon(item.pokemon)} alt={item.pokemon} className="w-6 h-6 object-contain shrink-0" onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')} />
-                            <span className="text-xs font-bold text-slate-300 truncate">{item.pokemon}</span>
-                          </div>
-                          <span className="text-xs font-mono text-cyan-300 shrink-0">{item.averageCost.toFixed(2)} VP</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Comparador de Times */}
-      {showCompareModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setShowCompareModal(false)}></div>
-          <div className="relative glass w-full max-w-6xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl p-6 overflow-hidden">
-            <div className="flex justify-between items-center mb-4 shrink-0">
-              <div>
-                <h2 className="text-xl font-bold text-pink-400">⚖️ Análise Comparativa por Pokémon</h2>
-                <p className="text-[11px] text-slate-400 mt-1">Escolha um Pokémon repetido e compare suas builds em todos os times em que ele aparece.</p>
-              </div>
-              <button onClick={() => setShowCompareModal(false)} className="text-slate-400 hover:text-white">✕</button>
-            </div>
-
-            <div className="mb-4 shrink-0">
-              <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Selecione o Pokémon para Comparar</label>
-              <select
-                value={activeComparePokemon}
-                onChange={e => {
-                  setComparePokemon(e.target.value);
-                  setCompareReferenceTeam('');
-                }}
-                className="bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-slate-200 w-full focus:outline-none focus:border-pink-500"
-              >
-                <option value="">Selecione um Pokémon...</option>
-                {pokemonFrequencies.map(f => (
-                  <option key={f.name} value={f.name}>
-                    {f.name} (Aparece em {f.count} times • {f.variations} {f.variations === 1 ? 'variação' : 'variações'})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {activeComparePokemon ? (
-              (() => {
-                const builds = teamsWithComparePokemon.map(t => {
-                  const poke = t.team.find(p => p.name === activeComparePokemon)!;
-                  return { team: t, poke };
-                });
-                const refBuild = builds.find(b => b.team.player_name === activeReferenceTeam);
-
-                return (
-                  <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
-                    {refBuild && (
-                      <div className="mb-4 bg-pink-950/10 border border-pink-500/30 rounded-xl p-3 flex items-center gap-3">
-                        <img 
-                          src={getPokeIcon(activeComparePokemon)} 
-                          alt={activeComparePokemon} 
-                          className="w-10 h-10 object-contain filter drop-shadow-md"
-                          onError={(e) => (e.currentTarget.src = 'https://r2.limitlesstcg.net/pokemon/gen9/unown.png')}
-                        />
-                        <div>
-                          <span className="text-[10px] text-pink-400 font-extrabold uppercase tracking-wider block">Build de Referência Atual</span>
-                          <span className="text-sm font-bold text-slate-100">{refBuild.team.player_name}</span>
-                          <span className="text-slate-400 text-[11px] ml-2">
-                            ({refBuild.poke.item || 'Sem item'} • {refBuild.poke.ability || 'Sem habilidade'} • {displayNatureName(refBuild.poke.nature)})
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {builds.map(({ team, poke }) => (
-                        <CompareBuildCard
-                          key={team.player_name}
-                          team={team}
-                          poke={poke}
-                          isReference={team.player_name === activeReferenceTeam}
-                          onSetReference={() => setCompareReferenceTeam(team.player_name)}
-                          refPoke={refBuild?.poke}
-                          allBuilds={builds}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()
-            ) : (
-              <div className="flex-1 bg-slate-950/50 border border-dashed border-slate-800 rounded p-8 flex flex-col items-center justify-center text-slate-500 text-sm">
-                <span>Nenhum Pokémon selecionado. Escolha um Pokémon no menu acima para começar.</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal Visualizar Time Completo */}
-      {viewingTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setViewingTeam(null)}></div>
-          <div className="relative glass w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl p-5 flex flex-col">
-            <div className="flex justify-between items-center mb-5 border-b border-slate-800 pb-3 shrink-0">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <span>📋 Detalhes do Time - {viewingTeam.player_name}</span>
-                </h2>
-                {viewingTeam.rental_code && (
-                  <span className="text-xs text-indigo-300 font-mono bg-indigo-900/30 px-2 py-0.5 rounded select-all mt-1 inline-block">
-                    Rental Code: {viewingTeam.rental_code}
-                  </span>
-                )}
-              </div>
-              <button onClick={() => setViewingTeam(null)} className="text-slate-400 hover:text-white text-lg font-bold">✕</button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_260px] gap-6 overflow-y-auto pr-1 custom-scrollbar">
-              {/* Pokémon cards grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {viewingTeam.team.map((p, idx) => (
-                  <div key={p.name + "-" + idx} className="bg-slate-900/35 border border-slate-800 rounded p-3">
-                    <div className="flex items-start gap-2 mb-2">
-                      <img src={getPokeIcon(p.name)} alt={p.name} className="w-8 h-8 object-contain shrink-0" onError={(e) => (e.currentTarget.src = "https://r2.limitlesstcg.net/pokemon/gen9/unown.png")} />
-                      <div className="min-w-0">
-                        <div className="font-bold text-sm text-slate-100 truncate">{p.name || '???'}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{p.item || "Sem item"}</div>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
-                      <div>
-                        <span className="block uppercase font-bold text-slate-500">Ability</span>
-                        <span className="text-slate-300">{p.ability || "-"}</span>
-                      </div>
-                      <div>
-                        <span className="block uppercase font-bold text-slate-500">Nature</span>
-                        <span className="text-slate-300">{displayNatureName(p.nature)}</span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-6 gap-1 mb-2">
-                      {(["hp", "atk", "def", "spa", "spd", "spe"] as const).map(stat => (
-                        <div key={stat} className="bg-slate-950/70 rounded px-1 py-0.5 text-center">
-                          <div className="text-[7px] uppercase text-slate-500 font-bold">{stat}</div>
-                          <div className="text-[9px] text-slate-300 font-mono">{p.evs[stat] || 0}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      {p.moves.map((move, midx) => (
-                        <span key={midx} className="bg-slate-950/50 border border-slate-800 rounded px-1.5 py-1 text-[10px] text-slate-300 truncate" title={move}>
-                          {move || "Vazio"}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Pokepaste panel on the right */}
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Texto Pokepaste</span>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(exportToPokepaste(viewingTeam));
-                      setIsCopied(true);
-                      setTimeout(() => setIsCopied(false), 2000);
-                    }}
-                    className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-1 rounded transition-all cursor-pointer"
-                  >
-                    {isCopied ? "✓ Copiado!" : "Copiar Texto"}
-                  </button>
-                </div>
-                <textarea
-                  readOnly
-                  value={exportToPokepaste(viewingTeam)}
-                  className="w-full flex-1 min-h-[200px] md:min-h-[300px] bg-slate-950 border border-slate-800 rounded p-2.5 font-mono text-[11px] leading-relaxed text-slate-300 select-all focus:outline-none custom-scrollbar resize-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center pt-4 border-t border-slate-800 mt-5 shrink-0">
-              <button
-                onClick={() => deleteTeam(viewingTeam.player_name)}
-                className="bg-red-950/40 hover:bg-red-900/40 text-red-400 hover:text-red-355 border border-red-900/50 hover:border-red-500/50 text-xs font-bold px-4 py-2 rounded-lg transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <span>🗑️</span> Excluir Time
-              </button>
-              <button onClick={() => setViewingTeam(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-6 py-2 rounded-lg transition-all cursor-pointer">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       {activeTooltip && (() => {
         const { name, nature, sharingMode, x, y } = activeTooltip;
         return (
