@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import rawData from '../dados-completos.json';
 import type { TeamData, Pokemon } from './types';
-import { findIsolatedTeams, calculateTeamTransitionCost, parsePokepaste, displayNatureName, calculateAverageBaseCosts, countPokemonVariations, calculateComboTotalVp, areTeamsCompatible, getPokemonSharingMode } from './utils';
+import { findIsolatedTeams, calculateTeamTransitionCost, parsePokepaste, displayNatureName, calculateAverageBaseCosts, countPokemonVariations, calculateComboTotalVp, getPokemonSharingMode } from './utils';
 
 // Import refactored components
 import PokemonIcon from './components/PokemonIcon';
@@ -29,27 +29,7 @@ function App() {
   } | null>(null);
 
   const [teams, setTeams] = useState<TeamData[]>(() => {
-    const initialData = Array.isArray(rawData) ? rawData : (rawData as { default?: TeamData[] }).default || [];
-    try {
-      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
-      const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
-      
-      let combined = [...initialData, ...custom];
-      // Deduplicate by player_name (custom teams override initial teams with same name)
-      const uniqueTeamsMap = new Map<string, TeamData>();
-      combined.forEach(t => {
-        uniqueTeamsMap.set(t.player_name, t);
-      });
-      combined = Array.from(uniqueTeamsMap.values());
-
-      if (deleted.length > 0) {
-        return combined.filter(t => !deleted.includes(t.player_name));
-      }
-      return combined;
-    } catch {
-      // ignore
-    }
-    return initialData as TeamData[];
+    return Array.isArray(rawData) ? rawData : (rawData as { default?: TeamData[] }).default || [];
   });
 
 
@@ -105,8 +85,10 @@ function App() {
   };
 
   useEffect(() => {
-    // Clean up deprecated storage keys but keep vgc_custom_teams
+    // Clean up deprecated and unused storage keys to prevent synchronization desync with the JSON file
     localStorage.removeItem('vgc_full_teams_json');
+    localStorage.removeItem('vgc_custom_teams');
+    localStorage.removeItem('vgc_deleted_teams');
   }, []);
 
   useEffect(() => {
@@ -136,22 +118,6 @@ function App() {
     }
     const nextTeams = teams.filter(t => t.player_name !== playerName);
 
-    // Save to deleted list in localStorage
-    try {
-      const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
-      if (!deleted.includes(playerName)) {
-        deleted.push(playerName);
-        localStorage.setItem('vgc_deleted_teams', JSON.stringify(deleted));
-      }
-      
-      // Also remove from custom teams if it was there
-      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
-      const filteredCustom = custom.filter((t: TeamData) => t.player_name !== playerName);
-      localStorage.setItem('vgc_custom_teams', JSON.stringify(filteredCustom));
-    } catch (e) {
-      console.error("Erro ao salvar exclusão no LocalStorage:", e);
-    }
-
     setTeams(nextTeams);
     setViewingTeam(null);
     setSelectedTeams(prev => prev.map(name => name === playerName ? '' : name));
@@ -167,7 +133,7 @@ function App() {
         body: JSON.stringify(cleanTeamsForJson(nextTeams)),
       });
     } catch {
-      console.warn('Não foi possível sincronizar a exclusão com o servidor. A alteração foi salva localmente no navegador.');
+      console.warn('Não foi possível sincronizar a exclusão com o servidor.');
     }
   };
 
@@ -186,22 +152,6 @@ function App() {
     }
     const nextTeams = [...teams, newTeam];
 
-    // Save to custom teams in localStorage
-    try {
-      const custom = JSON.parse(localStorage.getItem('vgc_custom_teams') || '[]');
-      // Avoid duplicate names in custom
-      const filteredCustom = custom.filter((t: TeamData) => t.player_name !== playerName);
-      filteredCustom.push(newTeam);
-      localStorage.setItem('vgc_custom_teams', JSON.stringify(filteredCustom));
-      
-      // If it was deleted before, undelete it
-      const deleted = JSON.parse(localStorage.getItem('vgc_deleted_teams') || '[]');
-      const filteredDeleted = deleted.filter((name: string) => name !== playerName);
-      localStorage.setItem('vgc_deleted_teams', JSON.stringify(filteredDeleted));
-    } catch (e) {
-      console.error("Erro ao salvar time no LocalStorage:", e);
-    }
-
     setTeams(nextTeams);
 
     try {
@@ -214,7 +164,7 @@ function App() {
         throw new Error('Nao foi possivel escrever o dados-completos.json.');
       }
     } catch {
-      console.warn('Não foi possível sincronizar o novo time com o servidor. O time foi salvo localmente no seu navegador.');
+      console.warn('Não foi possível sincronizar o novo time com o servidor.');
     }
 
     return null; // success
@@ -245,21 +195,20 @@ function App() {
 
     return activeTeams.filter(t => {
       if (t.player_name === t1Name || t.player_name === t3Name) return false;
-      // Must be compatible with t1
-      if (!areTeamsCompatible(t1, t, pokemonCopies)) return false;
+      // Must be compatible with t1 as a pair
+      if (calculateComboTotalVp([t1, t], pokemonCopies) > 30) return false;
 
       if (t3Name) {
         const t3 = activeTeams.find(x => x.player_name === t3Name);
         if (!t3) return false;
-        // Directional compatibility check (one must be target, the other source)
-        return areTeamsCompatible(t, t3, pokemonCopies) || areTeamsCompatible(t3, t, pokemonCopies);
+        // The three selected teams must form a compatible combo together
+        return calculateComboTotalVp([t1, t, t3], pokemonCopies) <= 30;
       } else {
         // Must have at least one valid partner for Slot 3 in activeTeams
         return activeTeams.some(other => 
           other.player_name !== t1Name && 
           other.player_name !== t.player_name && 
-          areTeamsCompatible(t1, other, pokemonCopies) && 
-          (areTeamsCompatible(t, other, pokemonCopies) || areTeamsCompatible(other, t, pokemonCopies))
+          calculateComboTotalVp([t1, t, other], pokemonCopies) <= 30
         );
       }
     });
@@ -274,21 +223,20 @@ function App() {
 
     return activeTeams.filter(t => {
       if (t.player_name === t1Name || t.player_name === t2Name) return false;
-      // Must be compatible with t1
-      if (!areTeamsCompatible(t1, t, pokemonCopies)) return false;
+      // Must be compatible with t1 as a pair
+      if (calculateComboTotalVp([t1, t], pokemonCopies) > 30) return false;
 
       if (t2Name) {
         const t2 = activeTeams.find(x => x.player_name === t2Name);
         if (!t2) return false;
-        // Directional compatibility check (one must be target, the other source)
-        return areTeamsCompatible(t2, t, pokemonCopies) || areTeamsCompatible(t, t2, pokemonCopies);
+        // The three selected teams must form a compatible combo together
+        return calculateComboTotalVp([t1, t2, t], pokemonCopies) <= 30;
       } else {
         // Must have at least one valid partner for Slot 2 in activeTeams
         return activeTeams.some(other => 
           other.player_name !== t1Name && 
           other.player_name !== t.player_name && 
-          areTeamsCompatible(t1, other, pokemonCopies) && 
-          (areTeamsCompatible(other, t, pokemonCopies) || areTeamsCompatible(t, other, pokemonCopies))
+          calculateComboTotalVp([t1, other, t], pokemonCopies) <= 30
         );
       }
     });
@@ -339,49 +287,28 @@ function App() {
 
       // Check Slot 1 replacement
       if (t1) {
-        const isCompatible = 
-          (!t2 || areTeamsCompatible(candidate, t2, pokemonCopies)) &&
-          (!t3 || areTeamsCompatible(candidate, t3, pokemonCopies)) &&
-          (!t2 || !t3 || areTeamsCompatible(t2, t3, pokemonCopies) || areTeamsCompatible(t3, t2, pokemonCopies));
-        
-        if (isCompatible) {
-          const newCombo = [candidate, t2, t3].filter((x): x is TeamData => !!x);
-          const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
-          if (vpCost === 0) {
-            replacements.push({ slotIndex: 1, newTotalVp: vpCost });
-          }
+        const newCombo = [candidate, t2, t3].filter((x): x is TeamData => !!x);
+        const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
+        if (vpCost === 0) {
+          replacements.push({ slotIndex: 1, newTotalVp: vpCost });
         }
       }
 
       // Check Slot 2 replacement
       if (t2) {
-        const isCompatible = 
-          (!t1 || areTeamsCompatible(t1, candidate, pokemonCopies)) &&
-          (!t1 || !t3 || areTeamsCompatible(t1, t3, pokemonCopies)) &&
-          (!t3 || areTeamsCompatible(candidate, t3, pokemonCopies) || areTeamsCompatible(t3, candidate, pokemonCopies));
-
-        if (isCompatible) {
-          const newCombo = [t1, candidate, t3].filter((x): x is TeamData => !!x);
-          const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
-          if (vpCost === 0) {
-            replacements.push({ slotIndex: 2, newTotalVp: vpCost });
-          }
+        const newCombo = [t1, candidate, t3].filter((x): x is TeamData => !!x);
+        const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
+        if (vpCost === 0) {
+          replacements.push({ slotIndex: 2, newTotalVp: vpCost });
         }
       }
 
       // Check Slot 3 replacement
       if (t3) {
-        const isCompatible = 
-          (!t1 || !t2 || areTeamsCompatible(t1, t2, pokemonCopies)) &&
-          (!t1 || areTeamsCompatible(t1, candidate, pokemonCopies)) &&
-          (!t2 || areTeamsCompatible(t2, candidate, pokemonCopies) || areTeamsCompatible(candidate, t2, pokemonCopies));
-
-        if (isCompatible) {
-          const newCombo = [t1, t2, candidate].filter((x): x is TeamData => !!x);
-          const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
-          if (vpCost === 0) {
-            replacements.push({ slotIndex: 3, newTotalVp: vpCost });
-          }
+        const newCombo = [t1, t2, candidate].filter((x): x is TeamData => !!x);
+        const vpCost = calculateComboTotalVp(newCombo, pokemonCopies);
+        if (vpCost === 0) {
+          replacements.push({ slotIndex: 3, newTotalVp: vpCost });
         }
       }
 
@@ -401,11 +328,12 @@ function App() {
         next[1] = '';
         next[2] = '';
       } else {
-        // Check if the other slot is compatible, if not, clear it
+        // Check if the overall combo is compatible, if not, clear the other slot
+        const t1 = activeTeams.find(t => t.player_name === next[0]);
         const t2 = activeTeams.find(t => t.player_name === next[1]);
         const t3 = activeTeams.find(t => t.player_name === next[2]);
-        if (t2 && t3) {
-          const isComp = areTeamsCompatible(t2, t3, pokemonCopies) || areTeamsCompatible(t3, t2, pokemonCopies);
+        if (t1 && t2 && t3) {
+          const isComp = calculateComboTotalVp([t1, t2, t3], pokemonCopies) <= 30;
           if (!isComp) {
             if (index === 1) {
               next[2] = '';
@@ -452,7 +380,7 @@ function App() {
     const t1 = activeTeams.find(t => t.player_name === t1Name);
     if (!t1) return [];
 
-    const candidates = nonIsolatedTeams.filter(t => t.player_name !== t1Name && areTeamsCompatible(t1, t, pokemonCopies));
+    const candidates = nonIsolatedTeams.filter(t => t.player_name !== t1Name && calculateComboTotalVp([t1, t], pokemonCopies) <= 30);
 
     const pairs: { teamA: TeamData; teamB: TeamData | null; totalVp: number }[] = [];
     const matchedCandidates = new Set<string>();
@@ -461,14 +389,9 @@ function App() {
       for (let j = i + 1; j < candidates.length; j++) {
         const tA = candidates[i];
         const tB = candidates[j];
-        if (areTeamsCompatible(tA, tB, pokemonCopies)) {
-          const totalVp = calculateComboTotalVp([t1, tA, tB], pokemonCopies);
+        const totalVp = calculateComboTotalVp([t1, tA, tB], pokemonCopies);
+        if (totalVp <= 30) {
           pairs.push({ teamA: tA, teamB: tB, totalVp });
-          matchedCandidates.add(tA.player_name);
-          matchedCandidates.add(tB.player_name);
-        } else if (areTeamsCompatible(tB, tA, pokemonCopies)) {
-          const totalVp = calculateComboTotalVp([t1, tB, tA], pokemonCopies);
-          pairs.push({ teamA: tB, teamB: tA, totalVp });
           matchedCandidates.add(tA.player_name);
           matchedCandidates.add(tB.player_name);
         }
@@ -479,7 +402,9 @@ function App() {
     candidates.forEach(t => {
       if (!matchedCandidates.has(t.player_name)) {
         const totalVp = calculateComboTotalVp([t1, t], pokemonCopies);
-        pairs.push({ teamA: t, teamB: null, totalVp });
+        if (totalVp <= 30) {
+          pairs.push({ teamA: t, teamB: null, totalVp });
+        }
       }
     });
 

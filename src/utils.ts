@@ -363,10 +363,10 @@ export const findCombinations = (teams: TeamData[], targetSize: number = 3, maxL
             const candidate = teams[i];
             if (!candidate.team) continue;
 
-            // Check if candidate is compatible with all teams currently in combo
-            const isCompatibleWithAll = currentCombo.every(t => areTeamsCompatible(t, candidate, pokemonCopies));
+            // Check if adding candidate keeps the entire combo compatible (total VP cost <= 30)
+            const isCompatible = calculateComboTotalVp([...currentCombo, candidate], pokemonCopies) <= 30;
 
-            if (isCompatibleWithAll) {
+            if (isCompatible) {
                 currentCombo.push(candidate);
                 search(currentCombo, i + 1);
                 currentCombo.pop();
